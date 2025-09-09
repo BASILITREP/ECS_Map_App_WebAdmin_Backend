@@ -6,6 +6,8 @@ using EcsFeMappingApi.Data;
 using EcsFeMappingApi.Models;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.SignalR;
+using EcsFeMappingApi.Services;
 
 namespace EcsFeMappingApi.Controllers
 {
@@ -14,10 +16,12 @@ namespace EcsFeMappingApi.Controllers
     public class BranchesController : ControllerBase
     {
         private readonly AppDbContext _context;
+        private readonly IHubContext<NotificationHub> _hubContext;
 
-        public BranchesController(AppDbContext context)
+        public BranchesController(AppDbContext context, IHubContext<NotificationHub> hubContext)
         {
             _context = context;
+            _hubContext = hubContext;
         }
 
         // GET: api/Branches
@@ -43,16 +47,16 @@ namespace EcsFeMappingApi.Controllers
 
         // POST: api/Branches
         [HttpPost]
-        public async Task<ActionResult<Branch>> PostBranch(Branch branch)
-        {
-            branch.CreatedAt = DateTime.UtcNow;
-            branch.UpdatedAt = DateTime.UtcNow;
-            
-            _context.Branches.Add(branch);
-            await _context.SaveChangesAsync();
+public async Task<ActionResult<Branch>> PostBranch(Branch branch)
+{
+    _context.Branches.Add(branch);
+    await _context.SaveChangesAsync();
 
-            return CreatedAtAction(nameof(GetBranch), new { id = branch.Id }, branch);
-        }
+    // Broadcast the new branch via SignalR
+    await _hubContext.Clients.All.SendAsync("newBranch", branch);
+
+    return CreatedAtAction("GetBranch", new { id = branch.Id }, branch);
+}
 
         // PUT: api/Branches/5
         [HttpPut("{id}")]

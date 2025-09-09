@@ -130,3 +130,6 @@ C:\developer\map_app_ecs\EcsFeMappingApi\obj\Debug\net9.0\refint\EcsFeMappingApi
 C:\developer\map_app_ecs\EcsFeMappingApi\obj\Debug\net9.0\EcsFeMappingApi.pdb
 C:\developer\map_app_ecs\EcsFeMappingApi\obj\Debug\net9.0\EcsFeMappingApi.genruntimeconfig.cache
 C:\developer\map_app_ecs\EcsFeMappingApi\obj\Debug\net9.0\ref\EcsFeMappingApi.dll
+C:\developer\map_app_ecs\EcsFeMappingApi\obj\Debug\net9.0\EcsFeMappingApi.sourcelink.json
+C:\developer\map_app_ecs\EcsFeMappingApi\bin\Debug\net9.0\Newtonsoft.Json.dll
+C:\developer\map_app_ecs\EcsFeMappingApi\bin\Debug\net9.0\System.Net.WebSockets.WebSocketProtocol.dll

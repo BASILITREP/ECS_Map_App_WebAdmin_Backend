@@ -4,6 +4,7 @@ using EcsFeMappingApi.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace EcsFeMappingApi.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20250905024744_AddOneSignalPlayerToFieldEngineer")]
+    partial class AddOneSignalPlayerToFieldEngineer
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -118,21 +121,11 @@ namespace EcsFeMappingApi.Migrations
 
                     MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
 
-                    b.Property<DateTime?>("AcceptedAt")
-                        .HasColumnType("datetime(6)");
-
                     b.Property<int>("BranchId")
                         .HasColumnType("int");
 
-                    b.Property<string>("BranchName")
-                        .IsRequired()
-                        .HasColumnType("longtext");
-
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime(6)");
-
-                    b.Property<double>("CurrentRadiusKm")
-                        .HasColumnType("double");
 
                     b.Property<string>("Description")
                         .IsRequired()
@@ -140,12 +133,6 @@ namespace EcsFeMappingApi.Migrations
 
                     b.Property<int?>("FieldEngineerId")
                         .HasColumnType("int");
-
-                    b.Property<double>("Lat")
-                        .HasColumnType("double");
-
-                    b.Property<double>("Lng")
-                        .HasColumnType("double");
 
                     b.Property<string>("Priority")
                         .IsRequired()

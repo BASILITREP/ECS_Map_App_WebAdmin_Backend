@@ -6,6 +6,8 @@ using EcsFeMappingApi.Data;
 using EcsFeMappingApi.Models;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.SignalR;
+using EcsFeMappingApi.Services;
 
 namespace EcsFeMappingApi.Controllers
 {
@@ -14,10 +16,12 @@ namespace EcsFeMappingApi.Controllers
     public class FieldEngineerController : ControllerBase
     {
         private readonly AppDbContext _context;
+        private readonly IHubContext<NotificationHub> _hubContext;
 
-        public FieldEngineerController(AppDbContext context)
+        public FieldEngineerController(AppDbContext context, IHubContext<NotificationHub> hubContext)
         {
             _context = context;
+            _hubContext = hubContext;
         }
 
         // GET: api/FieldEngineers
@@ -43,16 +47,16 @@ namespace EcsFeMappingApi.Controllers
 
         // POST: api/FieldEngineers
         [HttpPost]
-        public async Task<ActionResult<FieldEngineer>> PostFieldEngineer(FieldEngineer fieldEngineer)
-        {
-            fieldEngineer.CreatedAt = DateTime.UtcNow;
-            fieldEngineer.UpdatedAt = DateTime.UtcNow;
+public async Task<ActionResult<FieldEngineer>> PostFieldEngineer(FieldEngineer fieldEngineer)
+{
+    _context.FieldEngineers.Add(fieldEngineer);
+    await _context.SaveChangesAsync();
 
-            _context.FieldEngineers.Add(fieldEngineer);
-            await _context.SaveChangesAsync();
+    // Broadcast the new field engineer via SignalR
+    await _hubContext.Clients.All.SendAsync("newFieldEngineer", fieldEngineer);
 
-            return CreatedAtAction(nameof(GetFieldEngineer), new { id = fieldEngineer.Id }, fieldEngineer);
-        }
+    return CreatedAtAction("GetFieldEngineer", new { id = fieldEngineer.Id }, fieldEngineer);
+}
 
         // PUT: api/FieldEngineers/5
         [HttpPut("{id}")]
@@ -138,7 +142,7 @@ namespace EcsFeMappingApi.Controllers
 
             if (sr == null) return Ok(null);
 
-            return Ok(ServiceRequestDto.FromEntity(sr, DateTime.UtcNow));
+            return Ok(ServiceRequestDto.FromEntity(sr, sr.FieldEngineer));
         }
 
         private bool FieldEngineerExists(int id)

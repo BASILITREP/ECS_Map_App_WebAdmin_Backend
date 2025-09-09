@@ -1,27 +1,32 @@
 using EcsFeMappingApi.Data;
 using Microsoft.EntityFrameworkCore;
+using EcsFeMappingApi.Services;
+
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 builder.Services.AddControllers();
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
+builder.Services.AddSignalR();
+builder.Services.AddScoped<EcsFeMappingApi.Services.NotificationService>();
 
 // Configure MySQL
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseMySql(connectionString, ServerVersion.AutoDetect(connectionString)));
 
-// Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
-builder.Services.AddEndpointsApiExplorer();
-
-// Add CORS policy
+// Add SignalR
+builder.Services.AddSignalR();
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("AllowSpecificOrigin",
-        builder => builder.WithOrigins("http://localhost:5173", "http://localhost:3000") // Common frontend development ports
-                         .AllowCredentials()
-                         .AllowAnyHeader()
-                         .AllowAnyMethod());
+    options.AddPolicy("AllowAll", policy =>
+    {
+        policy.AllowAnyOrigin()
+              .AllowAnyHeader()
+              .AllowAnyMethod();
+    });
 });
 
 var app = builder.Build();
@@ -29,14 +34,20 @@ var app = builder.Build();
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
-    // Swagger configuration removed to fix build errors
+    app.UseSwagger();
+    app.UseSwaggerUI();
 }
 
-// Comment out HTTPS redirection since we're using HTTP for development
-// app.UseHttpsRedirection();
-app.UseCors("AllowSpecificOrigin");
+app.UseHttpsRedirection();
+
+// Use the CORS policy
+app.UseCors("AllowAll");
+
 app.UseAuthorization();
 
 app.MapControllers();
+
+// Map SignalR hub
+app.MapHub<NotificationHub>("/notificationHub");
 
 app.Run();
