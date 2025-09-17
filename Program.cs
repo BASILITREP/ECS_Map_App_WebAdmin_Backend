@@ -39,30 +39,31 @@ var connectionString = builder.Configuration.GetConnectionString("DefaultConnect
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseMySql(connectionString, ServerVersion.AutoDetect(connectionString)));
 
-// CORS configuration
+// CORS configuration - FIXED
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
     {
-        if (builder.Environment.IsDevelopment())
-        {
-            // Development CORS - restrictive
-            policy.WithOrigins(
-                    "http://localhost:5173",
-                    "http://localhost:5242",
-                    "http://192.168.211.42",
-                    "https://sdstestwebservices.equicom.com")
-                  .AllowAnyHeader()
-                  .AllowAnyMethod()
-                  .AllowCredentials();
-        }
-        else
-        {
-            // Production CORS - more permissive for your boss to access
-            policy.AllowAnyOrigin()
-                  .AllowAnyHeader()
-                  .AllowAnyMethod();
-        }
+        policy.WithOrigins(
+                "http://localhost:5173",
+                "http://localhost:3000",
+                "http://localhost:5242",
+                "https://localhost:7126",
+                "http://192.168.211.42",
+                "https://sdstestwebservices.equicom.com",
+                "https://ecsmapappwebadminbackend-production.up.railway.app" // Add your own domain
+            )
+            .AllowAnyHeader()
+            .AllowAnyMethod()
+            .AllowCredentials()
+            .SetIsOriginAllowed(origin => 
+            {
+                // Allow localhost in any environment for testing
+                if (string.IsNullOrEmpty(origin)) return false;
+                if (origin.StartsWith("http://localhost") || origin.StartsWith("https://localhost")) return true;
+                if (origin.StartsWith("http://127.0.0.1") || origin.StartsWith("https://127.0.0.1")) return true;
+                return true; // For production testing - remove this later for security
+            });
     });
 });
 
@@ -118,6 +119,8 @@ app.UseSwaggerUI(c =>
 // Important: Use CORS before other middleware
 app.UseCors("AllowFrontend");
 
+app.UseWebSockets();
+
 // Add authentication middleware
 app.UseAuthentication();
 app.UseAuthorization();
@@ -127,11 +130,19 @@ app.MapControllers();
 app.MapHub<NotificationHub>("/notificationHub");
 
 // Add a simple health check endpoint
-app.MapGet("/", () => new { 
-    message = "ECS FE Mapping API is running!", 
+app.MapGet("/", () => new
+{
+    message = "ECS FE Mapping API is running!",
     timestamp = DateTime.UtcNow,
     environment = app.Environment.EnvironmentName,
     database = "Railway MySQL"
 });
+
+// Test endpoint for CORS
+app.MapGet("/api/test", () => new {
+    message = "CORS test endpoint working!",
+    timestamp = DateTime.UtcNow,
+    cors = "Success"
+}).RequireCors("AllowFrontend");
 
 app.Run();
