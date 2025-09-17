@@ -39,7 +39,7 @@ var connectionString = builder.Configuration.GetConnectionString("DefaultConnect
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseMySql(connectionString, ServerVersion.AutoDetect(connectionString)));
 
-// Update CORS for Railway deployment
+// CORS configuration
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
@@ -66,7 +66,7 @@ builder.Services.AddCors(options =>
     });
 });
 
-// Add JWT Authentication
+// JWT Authentication
 var jwtKey = builder.Configuration["Jwt:Key"] ?? "YourTemporaryFallbackSecretKeyForDevelopmentOnly";
 var key = Encoding.ASCII.GetBytes(jwtKey);
 
@@ -90,6 +90,21 @@ builder.Services.AddAuthentication(options =>
 });
 
 var app = builder.Build();
+
+// Auto-create database tables on startup
+using (var scope = app.Services.CreateScope())
+{
+    try
+    {
+        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        await context.Database.EnsureCreatedAsync();
+        Console.WriteLine("✅ Railway database tables created successfully!");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"❌ Database creation error: {ex.Message}");
+    }
+}
 
 // Configure the HTTP request pipeline.
 // Always enable Swagger for Railway (so your boss can see API docs)
@@ -115,7 +130,8 @@ app.MapHub<NotificationHub>("/notificationHub");
 app.MapGet("/", () => new { 
     message = "ECS FE Mapping API is running!", 
     timestamp = DateTime.UtcNow,
-    environment = app.Environment.EnvironmentName 
+    environment = app.Environment.EnvironmentName,
+    database = "Railway MySQL"
 });
 
 app.Run();
