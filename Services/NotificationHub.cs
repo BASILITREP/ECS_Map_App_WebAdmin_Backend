@@ -67,11 +67,13 @@ namespace EcsFeMappingApi.Services
 
         public async Task BroadcastNewBranch(Branch branch)
         {
-            await Clients.All.SendAsync("newBranch", branch);
+            await Clients.All.SendAsync("ReceiveNewBranch", branch);
         }
         public async Task BroadcastNewFieldEngineer(FieldEngineer fe)
         {
-            await Clients.All.SendAsync("newFieldEngineer", fe);
+            await Clients.All.SendAsync("ReceiveNewFieldEngineer", fe);
         }
+
+        
     }
 }

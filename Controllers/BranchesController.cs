@@ -53,7 +53,7 @@ public async Task<ActionResult<Branch>> PostBranch(Branch branch)
     await _context.SaveChangesAsync();
 
     // Broadcast the new branch via SignalR
-    await _hubContext.Clients.All.SendAsync("newBranch", branch);
+    await _hubContext.Clients.All.SendAsync("ReceiveNewBranch", branch);
 
     return CreatedAtAction("GetBranch", new { id = branch.Id }, branch);
 }

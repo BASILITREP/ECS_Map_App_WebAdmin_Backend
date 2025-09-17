@@ -47,16 +47,21 @@ namespace EcsFeMappingApi.Controllers
 
         // POST: api/FieldEngineers
         [HttpPost]
-public async Task<ActionResult<FieldEngineer>> PostFieldEngineer(FieldEngineer fieldEngineer)
-{
-    _context.FieldEngineers.Add(fieldEngineer);
-    await _context.SaveChangesAsync();
-
-    // Broadcast the new field engineer via SignalR
-    await _hubContext.Clients.All.SendAsync("newFieldEngineer", fieldEngineer);
-
-    return CreatedAtAction("GetFieldEngineer", new { id = fieldEngineer.Id }, fieldEngineer);
-}
+        public async Task<ActionResult<FieldEngineer>> PostFieldEngineer(FieldEngineer fieldEngineer)
+        {
+            Console.WriteLine($"Creating new field engineer: {fieldEngineer.Name}");
+            
+            _context.FieldEngineers.Add(fieldEngineer);
+            var result = await _context.SaveChangesAsync();
+            
+            Console.WriteLine($"Database changes saved: {result} rows affected");
+            Console.WriteLine($"Field engineer ID after save: {fieldEngineer.Id}");
+            
+            await _hubContext.Clients.All.SendAsync("ReceiveNewFieldEngineer", fieldEngineer);
+            Console.WriteLine("SignalR notification sent for new field engineer");
+            
+            return CreatedAtAction("GetFieldEngineer", new { id = fieldEngineer.Id }, fieldEngineer);
+        }
 
         // PUT: api/FieldEngineers/5
         [HttpPut("{id}")]
@@ -145,6 +150,38 @@ public async Task<ActionResult<FieldEngineer>> PostFieldEngineer(FieldEngineer f
             return Ok(ServiceRequestDto.FromEntity(sr, sr.FieldEngineer));
         }
 
+        // POST: api/FieldEngineers/updateLocation
+        [HttpPost("updateLocation")]
+        public async Task<IActionResult> UpdateLocation([FromBody] LocationUpdateDto locationUpdate)
+        {
+            try
+            {
+                // Find the field engineer by ID
+                var engineer = await _context.FieldEngineers.FindAsync(locationUpdate.Id);
+                if (engineer == null)
+                {
+                    return NotFound("Field engineer not found");
+                }
+
+                // Update the location
+                engineer.CurrentLatitude = locationUpdate.CurrentLatitude;
+                engineer.CurrentLongitude = locationUpdate.CurrentLongitude;
+                engineer.UpdatedAt = DateTime.Now;
+
+                // Save changes
+                await _context.SaveChangesAsync();
+
+                // Notify all clients about the update
+                await _hubContext.Clients.All.SendAsync("ReceiveFieldEngineerUpdate", engineer);
+
+                return Ok();
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, ex.Message);
+            }
+        }
+
         private bool FieldEngineerExists(int id)
         {
             return _context.FieldEngineers.Any(e => e.Id == id);
@@ -156,5 +193,13 @@ public async Task<ActionResult<FieldEngineer>> PostFieldEngineer(FieldEngineer f
         public double Latitude { get; set; }
         public double Longitude { get; set; }
         public bool? IsAvailable { get; set; }
+    }
+
+    // Data Transfer Object
+    public class LocationUpdateDto
+    {
+        public int Id { get; set; }
+        public double CurrentLatitude { get; set; }
+        public double CurrentLongitude { get; set; }
     }
 }

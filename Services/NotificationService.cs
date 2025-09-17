@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using EcsFeMappingApi.Models;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Configuration;
 
 namespace EcsFeMappingApi.Services
@@ -14,18 +15,20 @@ namespace EcsFeMappingApi.Services
         private readonly HttpClient _httpClient;
         private readonly string? _oneSignalAppId;
         private readonly string? _oneSignalApiKey;
+        private readonly IHubContext<NotificationHub> _hubContext;
 
-       // Make sure the constructor looks something like this:
-public NotificationService(IConfiguration configuration)
-{
-    _httpClient = new HttpClient();
-    _oneSignalAppId = configuration["OneSignal:AppId"];
-    _oneSignalApiKey = configuration["OneSignal:ApiKey"];
-    if (!string.IsNullOrEmpty(_oneSignalApiKey))
-    {
-        _httpClient.DefaultRequestHeaders.Add("Authorization", $"Basic {_oneSignalApiKey}");
-    }
-}
+        // Make sure the constructor looks something like this:
+        public NotificationService(IConfiguration configuration, IHubContext<NotificationHub> hubContext)
+        {
+            _httpClient = new HttpClient();
+            _oneSignalAppId = configuration["OneSignal:AppId"];
+            _oneSignalApiKey = configuration["OneSignal:ApiKey"];
+            _hubContext = hubContext;
+            if (!string.IsNullOrEmpty(_oneSignalApiKey))
+            {
+                _httpClient.DefaultRequestHeaders.Add("Authorization", $"Basic {_oneSignalApiKey}");
+            }
+        }
 
         public async Task SendNotificationToEngineers(string title, string message, List<FieldEngineer> engineers, object? data = null)
         {
@@ -61,9 +64,8 @@ public NotificationService(IConfiguration configuration)
                 // Log error
                 Console.WriteLine($"OneSignal API error: {responseContent}");
             }
-
-
         }
+
         public async Task SendNewServiceRequest(ServiceRequest serviceRequest)
         {
             // This method can be expanded to include more complex logic if needed
@@ -77,20 +79,35 @@ public NotificationService(IConfiguration configuration)
         }
 
         public async Task SendServiceRequestUpdate(ServiceRequest serviceRequest, FieldEngineer? fieldEngineer = null)
-{
-    if (serviceRequest.FieldEngineer != null && fieldEngineer == null)
-    {
-        fieldEngineer = serviceRequest.FieldEngineer;
-    }
-    
-    if (fieldEngineer == null) return;
+        {
+            if (serviceRequest.FieldEngineer != null && fieldEngineer == null)
+            {
+                fieldEngineer = serviceRequest.FieldEngineer;
+            }
 
-    await SendNotificationToEngineers(
-        "Service Request Updated",
-        $"Service request for {serviceRequest.BranchName} has been updated.",
-        new List<FieldEngineer> { fieldEngineer },
-        new { serviceRequestId = serviceRequest.Id }
-    );
-}
+            if (fieldEngineer == null) return;
+
+            await SendNotificationToEngineers(
+                "Service Request Updated",
+                $"Service request for {serviceRequest.BranchName} has been updated.",
+                new List<FieldEngineer> { fieldEngineer },
+                new { serviceRequestId = serviceRequest.Id }
+            );
+        }
+
+        // Add method to send new service request notification
+        public async Task SendNewServiceRequestNotification(ServiceRequest request)
+        {
+            await _hubContext.Clients.All.SendAsync("ReceiveNewServiceRequest", request);
+        }
+
+        // Add this method to your existing NotificationService class
+
+        public async Task BroadcastCoordinateUpdate(object coordinateData)
+        {
+            await _hubContext.Clients.All.SendAsync("CoordinateUpdate", coordinateData);
+        }
+
+        
     }
 }

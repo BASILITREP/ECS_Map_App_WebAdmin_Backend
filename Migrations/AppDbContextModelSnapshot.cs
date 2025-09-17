@@ -171,6 +171,45 @@ namespace EcsFeMappingApi.Migrations
                     b.ToTable("ServiceRequests");
                 });
 
+            modelBuilder.Entity("EcsFeMappingApi.Models.UserModel", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<byte[]>("PasswordHash")
+                        .IsRequired()
+                        .HasColumnType("longblob");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .HasColumnType("longtext");
+
+                    b.Property<string>("Username")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("varchar(50)");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("Users");
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            CreatedAt = new DateTime(2025, 9, 15, 8, 55, 36, 285, DateTimeKind.Utc).AddTicks(1463),
+                            PasswordHash = new byte[] { 36, 50, 97, 36, 49, 49, 36, 114, 108, 104, 71, 56, 53, 106, 83, 114, 70, 106, 56, 66, 57, 109, 79, 57, 89, 83, 109, 48, 101, 54, 110, 53, 111, 57, 68, 78, 54, 90, 119, 117, 82, 68, 107, 67, 117, 115, 110, 49, 89, 101, 107, 116, 53, 122, 50, 73, 68, 118, 48, 46 },
+                            Role = "Admin",
+                            Username = "admin"
+                        });
+                });
+
             modelBuilder.Entity("EcsFeMappingApi.Models.ServiceRequest", b =>
                 {
                     b.HasOne("EcsFeMappingApi.Models.Branch", "Branch")

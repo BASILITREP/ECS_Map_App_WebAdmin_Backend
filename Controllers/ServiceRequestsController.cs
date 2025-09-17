@@ -48,33 +48,52 @@ namespace EcsFeMappingApi.Controllers
         }
 
         // POST: api/ServiceRequests
-        [HttpPost]
-        public async Task<ActionResult<ServiceRequest>> PostServiceRequest(ServiceRequestCreateDto srDto)
-        {
-            var branch = await _context.Branches.FindAsync(srDto.BranchId);
-            if (branch == null)
-            {
-                return BadRequest("Invalid BranchId");
-            }
+[HttpPost]
+public async Task<ActionResult<ServiceRequest>> PostServiceRequest(ServiceRequest serviceRequest)
+{
+    // Check if the branch already exists
+    var existingBranch = await _context.Branches.FindAsync(serviceRequest.BranchId);
+    if (existingBranch == null)
+    {
+        return NotFound($"Branch with ID {serviceRequest.BranchId} not found.");
+    }
 
-            var serviceRequest = new ServiceRequest
-            {
-                BranchId = srDto.BranchId,
-                Status = "pending",
-                CreatedAt = DateTime.UtcNow,
-                Lat = branch.Latitude,
-                Lng = branch.Longitude,
-                BranchName = branch.Name
-            };
+    // Detach any branch entity that might have come with the request
+    if (serviceRequest.Branch != null && _context.Entry(serviceRequest.Branch).State != EntityState.Detached)
+    {
+        _context.Entry(serviceRequest.Branch).State = EntityState.Detached;
+    }
 
-            _context.ServiceRequests.Add(serviceRequest);
-            await _context.SaveChangesAsync();
+    // Use the existing branch reference
+    serviceRequest.Branch = existingBranch;
+    
+    // Set any missing required fields
+    if (string.IsNullOrEmpty(serviceRequest.Status))
+    {
+        serviceRequest.Status = "pending";
+    }
+    
+    if (serviceRequest.CreatedAt == default)
+    {
+        serviceRequest.CreatedAt = DateTime.UtcNow;
+    }
+    
+    if (serviceRequest.UpdatedAt == default)
+    {
+        serviceRequest.UpdatedAt = DateTime.UtcNow;
+    }
+    
+    // Set ID to 0 to ensure it's treated as a new entity
+    serviceRequest.Id = 0;
 
-            // Broadcast the new service request via SignalR
-            await _notificationService.SendNewServiceRequest(serviceRequest);
+    _context.ServiceRequests.Add(serviceRequest);
+    await _context.SaveChangesAsync();
 
-            return CreatedAtAction("GetServiceRequest", new { id = serviceRequest.Id }, serviceRequest);
-        }
+    // Send notification about the new service request
+    await _notificationService.SendNewServiceRequestNotification(serviceRequest);
+
+    return CreatedAtAction("GetServiceRequest", new { id = serviceRequest.Id }, serviceRequest);
+}
 
         // POST: api/ServiceRequests/5/accept
         [HttpPost("{id}/accept")]

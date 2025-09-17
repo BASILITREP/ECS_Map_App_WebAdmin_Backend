@@ -1,9 +1,30 @@
 using EcsFeMappingApi.Data;
 using Microsoft.EntityFrameworkCore;
 using EcsFeMappingApi.Services;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
+using System.Text;
 
+var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+{
+    Args = args,
+    WebRootPath = "wwwroot"
+});
 
-var builder = WebApplication.CreateBuilder(args);
+// Configure Kestrel for Railway deployment
+builder.WebHost.ConfigureKestrel(serverOptions =>
+{
+    // Railway uses the PORT environment variable
+    var port = Environment.GetEnvironmentVariable("PORT");
+    if (!string.IsNullOrEmpty(port))
+    {
+        serverOptions.ListenAnyIP(int.Parse(port));
+    }
+    else
+    {
+        serverOptions.ListenAnyIP(5242); // Fallback for local development
+    }
+});
 
 // Add services to the container.
 builder.Services.AddControllers();
@@ -11,43 +32,90 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddSignalR();
 builder.Services.AddScoped<EcsFeMappingApi.Services.NotificationService>();
+builder.Services.AddScoped<EcsFeMappingApi.Services.AuthService>();
 
 // Configure MySQL
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseMySql(connectionString, ServerVersion.AutoDetect(connectionString)));
 
-// Add SignalR
-builder.Services.AddSignalR();
+// Update CORS for Railway deployment
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("AllowAll", policy =>
+    options.AddPolicy("AllowFrontend", policy =>
     {
-        policy.AllowAnyOrigin()
-              .AllowAnyHeader()
-              .AllowAnyMethod();
+        if (builder.Environment.IsDevelopment())
+        {
+            // Development CORS - restrictive
+            policy.WithOrigins(
+                    "http://localhost:5173",
+                    "http://localhost:5242",
+                    "http://192.168.211.42",
+                    "https://sdstestwebservices.equicom.com")
+                  .AllowAnyHeader()
+                  .AllowAnyMethod()
+                  .AllowCredentials();
+        }
+        else
+        {
+            // Production CORS - more permissive for your boss to access
+            policy.AllowAnyOrigin()
+                  .AllowAnyHeader()
+                  .AllowAnyMethod();
+        }
     });
+});
+
+// Add JWT Authentication
+var jwtKey = builder.Configuration["Jwt:Key"] ?? "YourTemporaryFallbackSecretKeyForDevelopmentOnly";
+var key = Encoding.ASCII.GetBytes(jwtKey);
+
+builder.Services.AddAuthentication(options =>
+{
+    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+})
+.AddJwtBearer(options =>
+{
+    options.RequireHttpsMetadata = false; // Important for Railway
+    options.SaveToken = true;
+    options.TokenValidationParameters = new TokenValidationParameters
+    {
+        ValidateIssuerSigningKey = true,
+        IssuerSigningKey = new SymmetricSecurityKey(key),
+        ValidateIssuer = false,
+        ValidateAudience = false,
+        ValidateLifetime = true
+    };
 });
 
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
+// Always enable Swagger for Railway (so your boss can see API docs)
+app.UseSwagger();
+app.UseSwaggerUI(c =>
 {
-    app.UseSwagger();
-    app.UseSwaggerUI();
-}
+    c.SwaggerEndpoint("/swagger/v1/swagger.json", "ECS FE Mapping API V1");
+    c.RoutePrefix = "swagger"; // Access via /swagger
+});
 
-app.UseHttpsRedirection();
+// Important: Use CORS before other middleware
+app.UseCors("AllowFrontend");
 
-// Use the CORS policy
-app.UseCors("AllowAll");
-
+// Add authentication middleware
+app.UseAuthentication();
 app.UseAuthorization();
-
 app.MapControllers();
 
 // Map SignalR hub
 app.MapHub<NotificationHub>("/notificationHub");
+
+// Add a simple health check endpoint
+app.MapGet("/", () => new { 
+    message = "ECS FE Mapping API is running!", 
+    timestamp = DateTime.UtcNow,
+    environment = app.Environment.EnvironmentName 
+});
 
 app.Run();
