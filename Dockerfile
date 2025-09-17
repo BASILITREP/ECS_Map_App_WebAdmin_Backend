@@ -4,10 +4,13 @@ EXPOSE 8080
 
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
-COPY ["EcsFeMappingApi.csproj", "."]
-RUN dotnet restore "./EcsFeMappingApi.csproj"
+
+# Copy csproj and restore as distinct layers
+COPY EcsFeMappingApi.csproj .
+RUN dotnet restore "EcsFeMappingApi.csproj"
+
+# Copy everything else and build
 COPY . .
-WORKDIR "/src/."
 RUN dotnet build "EcsFeMappingApi.csproj" -c Release -o /app/build
 
 FROM build AS publish
