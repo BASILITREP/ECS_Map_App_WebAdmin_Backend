@@ -24,7 +24,7 @@ namespace EcsFeMappingApi.Controllers
         {
             try
             {
-                Console.WriteLine($"Boss sent coordinates: Lat: {request.Latitude}, Lng: {request.Longitude}");
+                Console.WriteLine($"Boss sent coordinates: Lat: {request.Latitude}, Lng: {request.Longitude}, userId: {request.userId}");
             
                 var engineer = await _context.FieldEngineers
                     .FirstOrDefaultAsync(fe => fe.Email == "boss@company.com");
