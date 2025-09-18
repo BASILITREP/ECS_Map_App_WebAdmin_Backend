@@ -1,3 +1,4 @@
+using System.Threading.Tasks;
 using EcsFeMappingApi.Data;
 using EcsFeMappingApi.Models;
 using EcsFeMappingApi.Services;
@@ -48,52 +49,52 @@ namespace EcsFeMappingApi.Controllers
         }
 
         // POST: api/ServiceRequests
-[HttpPost]
-public async Task<ActionResult<ServiceRequest>> PostServiceRequest(ServiceRequest serviceRequest)
-{
-    // Check if the branch already exists
-    var existingBranch = await _context.Branches.FindAsync(serviceRequest.BranchId);
-    if (existingBranch == null)
-    {
-        return NotFound($"Branch with ID {serviceRequest.BranchId} not found.");
-    }
+        [HttpPost]
+        public async Task<ActionResult<ServiceRequest>> PostServiceRequest(ServiceRequest serviceRequest)
+        {
+            // Check if the branch already exists
+            var existingBranch = await _context.Branches.FindAsync(serviceRequest.BranchId);
+            if (existingBranch == null)
+            {
+                return NotFound($"Branch with ID {serviceRequest.BranchId} not found.");
+            }
 
-    // Detach any branch entity that might have come with the request
-    if (serviceRequest.Branch != null && _context.Entry(serviceRequest.Branch).State != EntityState.Detached)
-    {
-        _context.Entry(serviceRequest.Branch).State = EntityState.Detached;
-    }
+            // Detach any branch entity that might have come with the request
+            if (serviceRequest.Branch != null && _context.Entry(serviceRequest.Branch).State != EntityState.Detached)
+            {
+                _context.Entry(serviceRequest.Branch).State = EntityState.Detached;
+            }
 
-    // Use the existing branch reference
-    serviceRequest.Branch = existingBranch;
-    
-    // Set any missing required fields
-    if (string.IsNullOrEmpty(serviceRequest.Status))
-    {
-        serviceRequest.Status = "pending";
-    }
-    
-    if (serviceRequest.CreatedAt == default)
-    {
-        serviceRequest.CreatedAt = DateTime.UtcNow;
-    }
-    
-    if (serviceRequest.UpdatedAt == default)
-    {
-        serviceRequest.UpdatedAt = DateTime.UtcNow;
-    }
-    
-    // Set ID to 0 to ensure it's treated as a new entity
-    serviceRequest.Id = 0;
+            // Use the existing branch reference
+            serviceRequest.Branch = existingBranch;
 
-    _context.ServiceRequests.Add(serviceRequest);
-    await _context.SaveChangesAsync();
+            // Set any missing required fields
+            if (string.IsNullOrEmpty(serviceRequest.Status))
+            {
+                serviceRequest.Status = "pending";
+            }
 
-    // Send notification about the new service request
-    await _notificationService.SendNewServiceRequestNotification(serviceRequest);
+            if (serviceRequest.CreatedAt == default)
+            {
+                serviceRequest.CreatedAt = DateTime.UtcNow;
+            }
 
-    return CreatedAtAction("GetServiceRequest", new { id = serviceRequest.Id }, serviceRequest);
-}
+            if (serviceRequest.UpdatedAt == default)
+            {
+                serviceRequest.UpdatedAt = DateTime.UtcNow;
+            }
+
+            // Set ID to 0 to ensure it's treated as a new entity
+            serviceRequest.Id = 0;
+
+            _context.ServiceRequests.Add(serviceRequest);
+            await _context.SaveChangesAsync();
+
+            // Send notification about the new service request
+            await _notificationService.SendNewServiceRequestNotification(serviceRequest);
+
+            return CreatedAtAction("GetServiceRequest", new { id = serviceRequest.Id }, serviceRequest);
+        }
 
         // POST: api/ServiceRequests/5/accept
         [HttpPost("{id}/accept")]
@@ -137,5 +138,34 @@ public async Task<ActionResult<ServiceRequest>> PostServiceRequest(ServiceReques
         {
             public int FieldEngineerId { get; set; }
         }
+
+        [HttpGet("woop")]
+        public async Task<IActionResult> Woop()
+        {
+            try
+            {
+                var serviceRequests = await _context.ServiceRequests.Where(x => x.FieldEngineerId == null).ToListAsync();
+                return Ok(serviceRequests);
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(ex.Message);
+            }
+        }
+        [HttpPost("{serviceId}/{id}")]
+        public async Task<IActionResult> Test(int serviceId, int id)
+        {
+            var serviceRequest = await _context.ServiceRequests.FindAsync(serviceId);
+            if (serviceRequest == null)
+            {
+                return NotFound("Service request not found.");
+            }
+            else
+            {
+                serviceRequest.FieldEngineerId = id;   
+                return Ok(await _context.SaveChangesAsync());
+            }
+        }
     }
-}
+            }
+           

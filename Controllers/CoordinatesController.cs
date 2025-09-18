@@ -25,8 +25,7 @@ namespace EcsFeMappingApi.Controllers
             try
             {
                 Console.WriteLine($"Boss sent coordinates: Lat: {request.Latitude}, Lng: {request.Longitude}");
-                
-                // Save to database as a FieldEngineer (or create a separate table for boss locations)
+            
                 var engineer = await _context.FieldEngineers
                     .FirstOrDefaultAsync(fe => fe.Email == "boss@company.com");
 
@@ -116,6 +115,7 @@ namespace EcsFeMappingApi.Controllers
         public double Longitude { get; set; }
         public string? Description { get; set; } = "Boss location";
         public string? Type { get; set; } = "boss_update";
+        public int? userId { get; set; }
         public DateTime Timestamp { get; set; } = DateTime.UtcNow;
     }
 }
