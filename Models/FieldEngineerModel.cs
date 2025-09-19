@@ -14,7 +14,8 @@ namespace EcsFeMappingApi.Models
         public double? CurrentLongitude { get; set; }
         public bool IsAvailable { get; set; }
         public string Status { get; set; } = string.Empty;
-        public string? OneSignalPlayerId { get; set; } // For push notification targeting
+        public string? OneSignalPlayerId { get; set; }
+        public string? FcmToken { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }
     }

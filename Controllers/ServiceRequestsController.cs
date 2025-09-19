@@ -76,24 +76,25 @@ public async Task<ActionResult<ServiceRequest>> PostServiceRequest(ServiceReques
 
         // Send notification to field engineers
         var fieldEngineers = await _context.FieldEngineers
-            .Where(fe => !string.IsNullOrEmpty(fe.OneSignalPlayerId)) // Reusing OneSignalPlayerId for FCM token
+            .Where(fe => !string.IsNullOrEmpty(fe.FcmToken)) // Use FcmToken instead of OneSignalPlayerId
             .ToListAsync();
 
         var fcmService = new FcmNotificationService(_configuration);
         foreach (var engineer in fieldEngineers)
         {
+            Console.WriteLine($"Sending notification to Field Engineer: {engineer.Name}, FCM Token: {engineer.FcmToken}");
             await fcmService.SendNotificationAsync(
-                engineer.OneSignalPlayerId,
-                "New Service Request",
-                $"A new service request has been created for {serviceRequest.Branch?.Name ?? "Unknown location"}",
-                new Dictionary<string, string>
-                {
+                        engineer.FcmToken, // Use FcmToken here
+                        "New Service Request",
+                        $"A new service request has been created for {serviceRequest.Branch?.Name ?? "Unknown location"}",
+                        new Dictionary<string, string>
+                        {
                     { "type", "new_service_request" },
                     { "serviceRequestId", serviceRequest.Id.ToString() },
                     { "branchName", serviceRequest.Branch?.Name ?? "Unknown" },
                     { "branchId", serviceRequest.BranchId.ToString() }
-                }
-            );
+                        }
+                    );
         }
 
         return CreatedAtAction("GetServiceRequest", new { id = serviceRequest.Id }, serviceRequest);

@@ -19,36 +19,41 @@ public class FcmNotificationService
     }
 
     public async Task SendNotificationAsync(string fcmToken, string title, string body, Dictionary<string, string>? data = null)
+{
+    var message = new
     {
-        var message = new
+        message = new
         {
-            message = new
+            token = fcmToken,
+            notification = new
             {
-                token = fcmToken,
-                notification = new
-                {
-                    title = title,
-                    body = body
-                },
-                data = data ?? new Dictionary<string, string>()
-            }
-        };
-
-        var jsonMessage = JsonSerializer.Serialize(message);
-        var credential = GoogleCredential.FromFile(_configuration["Firebase:ServiceAccountJsonPath"])
-       .CreateScoped("https://www.googleapis.com/auth/firebase.messaging");
-
-        var token = await credential.UnderlyingCredential.GetAccessTokenForRequestAsync();
-
-        _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
-
-        var content = new StringContent(jsonMessage, Encoding.UTF8, "application/json");
-        var response = await _httpClient.PostAsync($"https://fcm.googleapis.com/v1/projects/{_projectId}/messages:send", content);
-
-        if (!response.IsSuccessStatusCode)
-        {
-            var error = await response.Content.ReadAsStringAsync();
-            throw new Exception($"Failed to send FCM notification: {error}");
+                title = title,
+                body = body
+            },
+            data = data ?? new Dictionary<string, string>()
         }
+    };
+
+    var jsonMessage = JsonSerializer.Serialize(message);
+    var credential = GoogleCredential.FromFile(_configuration["Firebase:ServiceAccountJsonPath"])
+        .CreateScoped("https://www.googleapis.com/auth/firebase.messaging");
+
+    var token = await credential.UnderlyingCredential.GetAccessTokenForRequestAsync();
+
+    _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+    var content = new StringContent(jsonMessage, Encoding.UTF8, "application/json");
+    var response = await _httpClient.PostAsync($"https://fcm.googleapis.com/v1/projects/{_projectId}/messages:send", content);
+
+    if (!response.IsSuccessStatusCode)
+    {
+        var error = await response.Content.ReadAsStringAsync();
+        Console.WriteLine($"Failed to send FCM notification: {error}"); // Add logging
+        throw new Exception($"Failed to send FCM notification: {error}");
     }
+    else
+    {
+        Console.WriteLine($"Notification sent successfully to FCM token: {fcmToken}"); // Add logging
+    }
+}
 }
