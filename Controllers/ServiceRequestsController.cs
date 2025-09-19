@@ -53,44 +53,56 @@ namespace EcsFeMappingApi.Controllers
 
         // POST: api/ServiceRequests
         [HttpPost]
-        public async Task<ActionResult<ServiceRequest>> PostServiceRequest(ServiceRequest serviceRequest)
+public async Task<ActionResult<ServiceRequest>> PostServiceRequest(ServiceRequest serviceRequest)
+{
+    try
+    {
+        // Check if the branch already exists
+        var existingBranch = await _context.Branches.FindAsync(serviceRequest.BranchId);
+        if (existingBranch != null)
         {
-            try
-            {
-                // Save the service request to the database
-                _context.ServiceRequests.Add(serviceRequest);
-                await _context.SaveChangesAsync();
-
-                // Get the FCM token of the field engineer (or broadcast to all engineers)
-                var fieldEngineers = await _context.FieldEngineers
-                    .Where(fe => !string.IsNullOrEmpty(fe.OneSignalPlayerId)) // Reusing OneSignalPlayerId for FCM token
-                    .ToListAsync();
-
-                // Send notification to all field engineers
-                var fcmService = new FcmNotificationService(_configuration);
-                foreach (var engineer in fieldEngineers)
-                {
-                    await fcmService.SendNotificationAsync(
-                        engineer.OneSignalPlayerId,
-                        "New Service Request",
-                        $"A new service request has been created for {serviceRequest.Branch?.Name ?? "Unknown location"}",
-                        new Dictionary<string, string>
-                        {
-                            { "type", "new_service_request" },
-                            { "serviceRequestId", serviceRequest.Id.ToString() },
-                            { "branchName", serviceRequest.Branch?.Name ?? "Unknown" },
-                            { "branchId", serviceRequest.BranchId.ToString() }
-                        }
-                    );
-                }
-
-                return CreatedAtAction("GetServiceRequest", new { id = serviceRequest.Id }, serviceRequest);
-            }
-            catch (Exception ex)
-            {
-                return BadRequest(new { error = ex.Message });
-            }
+            // Associate the existing branch with the service request
+            serviceRequest.Branch = existingBranch;
         }
+        else
+        {
+            // If no branch exists, add the new branch
+            _context.Branches.Add(serviceRequest.Branch);
+        }
+
+        // Save the service request to the database
+        _context.ServiceRequests.Add(serviceRequest);
+        await _context.SaveChangesAsync();
+
+        // Send notification to field engineers
+        var fieldEngineers = await _context.FieldEngineers
+            .Where(fe => !string.IsNullOrEmpty(fe.OneSignalPlayerId)) // Reusing OneSignalPlayerId for FCM token
+            .ToListAsync();
+
+        var fcmService = new FcmNotificationService(_configuration);
+        foreach (var engineer in fieldEngineers)
+        {
+            await fcmService.SendNotificationAsync(
+                engineer.OneSignalPlayerId,
+                "New Service Request",
+                $"A new service request has been created for {serviceRequest.Branch?.Name ?? "Unknown location"}",
+                new Dictionary<string, string>
+                {
+                    { "type", "new_service_request" },
+                    { "serviceRequestId", serviceRequest.Id.ToString() },
+                    { "branchName", serviceRequest.Branch?.Name ?? "Unknown" },
+                    { "branchId", serviceRequest.BranchId.ToString() }
+                }
+            );
+        }
+
+        return CreatedAtAction("GetServiceRequest", new { id = serviceRequest.Id }, serviceRequest);
+    }
+    catch (Exception ex)
+    {
+        return BadRequest(new { error = ex.Message });
+    }
+}
 
         // POST: api/ServiceRequests/5/accept
         [HttpPost("{id}/accept")]
