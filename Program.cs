@@ -33,7 +33,7 @@ builder.Services.AddSwaggerGen();
 builder.Services.AddSignalR();
 builder.Services.AddScoped<EcsFeMappingApi.Services.NotificationService>();
 builder.Services.AddScoped<EcsFeMappingApi.Services.AuthService>();
-builder.Services.AddHttpClient<FcmNotificationService>();
+builder.Services.AddScoped<FcmNotificationService>();
 
 // Configure MySQL
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
