@@ -58,14 +58,16 @@ namespace EcsFeMappingApi.Controllers
                 await _context.SaveChangesAsync();
 
                 // Broadcast to all connected clients
-                await _notificationService.BroadcastCoordinateUpdate(new {
+                await _notificationService.BroadcastCoordinateUpdate(new
+                {
                     type = "boss_location",
                     engineer = engineer,
                     latitude = request.Latitude,
                     longitude = request.Longitude,
                     description = request.Description,
                     timestamp = DateTime.UtcNow,
-                    source = "boss"
+                    source = "boss",
+                
                 });
                 
                 return Ok(new { 

@@ -4,6 +4,7 @@ using EcsFeMappingApi.Models;
 using EcsFeMappingApi.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 
 
 namespace EcsFeMappingApi.Controllers
@@ -14,11 +15,13 @@ namespace EcsFeMappingApi.Controllers
     {
         private readonly AppDbContext _context;
         private readonly NotificationService _notificationService;
+        private readonly IConfiguration _configuration;
 
-        public ServiceRequestsController(AppDbContext context, NotificationService notificationService)
+        public ServiceRequestsController(AppDbContext context, NotificationService notificationService, IConfiguration configuration)
         {
             _context = context;
             _notificationService = notificationService;
+            _configuration = configuration;
         }
 
         // GET: api/ServiceRequests
@@ -52,48 +55,41 @@ namespace EcsFeMappingApi.Controllers
         [HttpPost]
         public async Task<ActionResult<ServiceRequest>> PostServiceRequest(ServiceRequest serviceRequest)
         {
-            // Check if the branch already exists
-            var existingBranch = await _context.Branches.FindAsync(serviceRequest.BranchId);
-            if (existingBranch == null)
+            try
             {
-                return NotFound($"Branch with ID {serviceRequest.BranchId} not found.");
-            }
+                // Save the service request to the database
+                _context.ServiceRequests.Add(serviceRequest);
+                await _context.SaveChangesAsync();
 
-            // Detach any branch entity that might have come with the request
-            if (serviceRequest.Branch != null && _context.Entry(serviceRequest.Branch).State != EntityState.Detached)
+                // Get the FCM token of the field engineer (or broadcast to all engineers)
+                var fieldEngineers = await _context.FieldEngineers
+                    .Where(fe => !string.IsNullOrEmpty(fe.OneSignalPlayerId)) // Reusing OneSignalPlayerId for FCM token
+                    .ToListAsync();
+
+                // Send notification to all field engineers
+                var fcmService = new FcmNotificationService(_configuration);
+                foreach (var engineer in fieldEngineers)
+                {
+                    await fcmService.SendNotificationAsync(
+                        engineer.OneSignalPlayerId,
+                        "New Service Request",
+                        $"A new service request has been created for {serviceRequest.Branch?.Name ?? "Unknown location"}",
+                        new Dictionary<string, string>
+                        {
+                            { "type", "new_service_request" },
+                            { "serviceRequestId", serviceRequest.Id.ToString() },
+                            { "branchName", serviceRequest.Branch?.Name ?? "Unknown" },
+                            { "branchId", serviceRequest.BranchId.ToString() }
+                        }
+                    );
+                }
+
+                return CreatedAtAction("GetServiceRequest", new { id = serviceRequest.Id }, serviceRequest);
+            }
+            catch (Exception ex)
             {
-                _context.Entry(serviceRequest.Branch).State = EntityState.Detached;
+                return BadRequest(new { error = ex.Message });
             }
-
-            // Use the existing branch reference
-            serviceRequest.Branch = existingBranch;
-
-            // Set any missing required fields
-            if (string.IsNullOrEmpty(serviceRequest.Status))
-            {
-                serviceRequest.Status = "pending";
-            }
-
-            if (serviceRequest.CreatedAt == default)
-            {
-                serviceRequest.CreatedAt = DateTime.UtcNow;
-            }
-
-            if (serviceRequest.UpdatedAt == default)
-            {
-                serviceRequest.UpdatedAt = DateTime.UtcNow;
-            }
-
-            // Set ID to 0 to ensure it's treated as a new entity
-            serviceRequest.Id = 0;
-
-            _context.ServiceRequests.Add(serviceRequest);
-            await _context.SaveChangesAsync();
-
-            // Send notification about the new service request
-            await _notificationService.SendNewServiceRequestNotification(serviceRequest);
-
-            return CreatedAtAction("GetServiceRequest", new { id = serviceRequest.Id }, serviceRequest);
         }
 
         // POST: api/ServiceRequests/5/accept
@@ -162,10 +158,11 @@ namespace EcsFeMappingApi.Controllers
             }
             else
             {
-                serviceRequest.FieldEngineerId = id;   
+                serviceRequest.FieldEngineerId = id;
                 return Ok(await _context.SaveChangesAsync());
             }
         }
+        
+        
     }
             }
-           
