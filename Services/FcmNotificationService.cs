@@ -1,6 +1,4 @@
 using Google.Apis.Auth.OAuth2;
-using Google.Apis.Services;
-using Google.Apis.Util.Store;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -14,52 +12,61 @@ public class FcmNotificationService
     public FcmNotificationService(IConfiguration configuration)
     {
         _configuration = configuration;
-        _projectId = _configuration["Firebase:ProjectId"]; // Add this to appsettings.json
-        _projectId = configuration["Firebase:ProjectId"]; // Add this to appsettings.json
+        _projectId = _configuration["Firebase:ProjectId"];
+        _httpClient = new HttpClient(); // This line is new
     }
 
     public async Task SendNotificationAsync(string fcmToken, string title, string body, Dictionary<string, string>? data = null)
-{
-    var message = new
     {
-        message = new
+        var message = new
         {
-            token = fcmToken,
-            notification = new
+            message = new
             {
-                title = title,
-                body = body
-            },
-            data = data ?? new Dictionary<string, string>()
+                token = fcmToken,
+                notification = new
+                {
+                    title = title,
+                    body = body
+                },
+                data = data ?? new Dictionary<string, string>()
+            }
+        };
+
+        var jsonMessage = JsonSerializer.Serialize(message);
+        var serviceAccountJson = Environment.GetEnvironmentVariable("FIREBASE_SERVICE_ACCOUNT");
+        if (string.IsNullOrEmpty(serviceAccountJson))
+        {
+            throw new Exception("Firebase service account JSON is not configured.");
         }
-    };
 
-    var jsonMessage = JsonSerializer.Serialize(message);
-    var serviceAccountJson = Environment.GetEnvironmentVariable("FIREBASE_SERVICE_ACCOUNT");
-if (string.IsNullOrEmpty(serviceAccountJson))
-{
-    throw new Exception("Firebase service account JSON is not configured.");
-}
+        var credential = GoogleCredential.FromJson(serviceAccountJson)
+            .CreateScoped("https://www.googleapis.com/auth/firebase.messaging");
 
-var credential = GoogleCredential.FromJson(serviceAccountJson)
-    .CreateScoped("https://www.googleapis.com/auth/firebase.messaging");
+        var token = await credential.UnderlyingCredential.GetAccessTokenForRequestAsync();
 
-    var token = await credential.UnderlyingCredential.GetAccessTokenForRequestAsync();
+        _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
-    _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var content = new StringContent(jsonMessage, Encoding.UTF8, "application/json");
+        var response = await _httpClient.PostAsync($"https://fcm.googleapis.com/v1/projects/{_projectId}/messages:send", content);
 
-    var content = new StringContent(jsonMessage, Encoding.UTF8, "application/json");
-    var response = await _httpClient.PostAsync($"https://fcm.googleapis.com/v1/projects/{_projectId}/messages:send", content);
-
-    if (!response.IsSuccessStatusCode)
-    {
-        var error = await response.Content.ReadAsStringAsync();
-        Console.WriteLine($"Failed to send FCM notif: {error}"); // Add logging
-        throw new Exception($"Failed to send FCM notification: {error}");
+        if (!response.IsSuccessStatusCode)
+        {
+            var error = await response.Content.ReadAsStringAsync();
+            Console.WriteLine($"Failed to send FCM notif: {error}");
+            throw new Exception($"Failed to send FCM notification: {error}");
+        }
+        else
+        {
+            Console.WriteLine($"Notification sent successfully to FCM token: {fcmToken}");
+        }
     }
-    else
+
+    // A new method to handle multiple tokens
+    public async Task SendNotificationToMultipleDevicesAsync(List<string> fcmTokens, string title, string body, Dictionary<string, string>? data = null)
     {
-        Console.WriteLine($"Notification sent successfully to FCM token: {fcmToken}"); // Add logging
+        foreach (var token in fcmTokens)
+        {
+            await SendNotificationAsync(token, title, body, data);
+        }
     }
-}
 }

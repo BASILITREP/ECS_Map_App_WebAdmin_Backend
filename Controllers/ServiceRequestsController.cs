@@ -170,31 +170,27 @@ namespace EcsFeMappingApi.Controllers
 
         // --- Helper Method for Notifications ---
         private async Task NotifyFieldEngineers(ServiceRequest sr)
-        {
-            // 1. Define the radius in kilometers.
-            // You can make this dynamic later, perhaps from a config file.
-            const double radiusKm = 10.0;
+{
+    const double radiusKm = 10.0;
 
-            // 2. Get all active field engineers.
-            var allEngineers = await _context.FieldEngineers
-                                             .Where(fe => fe.Status != "Inactive" && !string.IsNullOrEmpty(fe.FcmToken))
-                                             .ToListAsync();
+    var allEngineers = await _context.FieldEngineers
+                                     .Where(fe => fe.Status != "Inactive" && !string.IsNullOrEmpty(fe.FcmToken))
+                                     .ToListAsync();
 
-            // 3. Find engineers within the radius.
-            var engineersInRange = allEngineers.Where(fe =>
-                CalculateDistance(sr.Lat, sr.Lng, fe.CurrentLatitude, fe.CurrentLongitude) <= radiusKm
-            ).ToList();
+    var engineersInRange = allEngineers.Where(fe =>
+        CalculateDistance(sr.Lat, sr.Lng, fe.CurrentLatitude, fe.CurrentLongitude) <= radiusKm
+    ).ToList();
 
-            if (engineersInRange.Any())
-            {
-                // 4. Send notifications
-                var token = engineersInRange.Select(fe => fe.FcmToken).FirstOrDefault();
-                var title = "New Service Request";
-                var body = $"A new service request is available at {sr.BranchName}.";
+    if (engineersInRange.Any())
+    {
+        var tokens = engineersInRange.Select(fe => fe.FcmToken).ToList();
+        var title = "New Service Request";
+        var body = $"A new service request is available at {sr.BranchName}.";
 
-                await _fcmNotificationService.SendNotificationAsync(token, title, body);
-            }
-        }
+        // Use the new method to send to multiple devices
+        await _fcmNotificationService.SendNotificationToMultipleDevicesAsync(tokens, title, body);
+    }
+}
 
         private double CalculateDistance(double lat1, double lon1, double lat2, double lon2)
         {
