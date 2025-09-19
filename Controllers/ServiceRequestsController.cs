@@ -1,10 +1,12 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using EcsFeMappingApi.Data;
 using EcsFeMappingApi.Models;
 using EcsFeMappingApi.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-
 
 namespace EcsFeMappingApi.Controllers
 {
@@ -14,11 +16,13 @@ namespace EcsFeMappingApi.Controllers
     {
         private readonly AppDbContext _context;
         private readonly NotificationService _notificationService;
+        private readonly FcmNotificationService _fcmNotificationService; // Assuming you have this service
 
-        public ServiceRequestsController(AppDbContext context, NotificationService notificationService)
+        public ServiceRequestsController(AppDbContext context, NotificationService notificationService, FcmNotificationService fcmNotificationService)
         {
             _context = context;
             _notificationService = notificationService;
+            _fcmNotificationService = fcmNotificationService;
         }
 
         // GET: api/ServiceRequests
@@ -52,23 +56,19 @@ namespace EcsFeMappingApi.Controllers
         [HttpPost]
         public async Task<ActionResult<ServiceRequest>> PostServiceRequest(ServiceRequest serviceRequest)
         {
-            // Check if the branch already exists
             var existingBranch = await _context.Branches.FindAsync(serviceRequest.BranchId);
             if (existingBranch == null)
             {
                 return NotFound($"Branch with ID {serviceRequest.BranchId} not found.");
             }
 
-            // Detach any branch entity that might have come with the request
             if (serviceRequest.Branch != null && _context.Entry(serviceRequest.Branch).State != EntityState.Detached)
             {
                 _context.Entry(serviceRequest.Branch).State = EntityState.Detached;
             }
 
-            // Use the existing branch reference
             serviceRequest.Branch = existingBranch;
 
-            // Set any missing required fields
             if (string.IsNullOrEmpty(serviceRequest.Status))
             {
                 serviceRequest.Status = "pending";
@@ -84,14 +84,16 @@ namespace EcsFeMappingApi.Controllers
                 serviceRequest.UpdatedAt = DateTime.UtcNow;
             }
 
-            // Set ID to 0 to ensure it's treated as a new entity
             serviceRequest.Id = 0;
 
             _context.ServiceRequests.Add(serviceRequest);
             await _context.SaveChangesAsync();
 
-            // Send notification about the new service request
             await _notificationService.SendNewServiceRequestNotification(serviceRequest);
+
+            // --- New Notification Logic ---
+            await NotifyFieldEngineers(serviceRequest);
+            // --------------------------
 
             return CreatedAtAction("GetServiceRequest", new { id = serviceRequest.Id }, serviceRequest);
         }
@@ -123,7 +125,6 @@ namespace EcsFeMappingApi.Controllers
 
             await _context.SaveChangesAsync();
 
-            // Broadcast the update via SignalR
             await _notificationService.SendServiceRequestUpdate(serviceRequest);
 
             return Ok();
@@ -162,11 +163,55 @@ namespace EcsFeMappingApi.Controllers
             }
             else
             {
-                serviceRequest.FieldEngineerId = id;   
+                serviceRequest.FieldEngineerId = id;
                 return Ok(await _context.SaveChangesAsync());
             }
         }
-        
-    }
+
+        // --- Helper Method for Notifications ---
+        private async Task NotifyFieldEngineers(ServiceRequest sr)
+        {
+            // 1. Define the radius in kilometers.
+            // You can make this dynamic later, perhaps from a config file.
+            const double radiusKm = 10.0;
+
+            // 2. Get all active field engineers.
+            var allEngineers = await _context.FieldEngineers
+                                             .Where(fe => fe.Status != "Inactive" && !string.IsNullOrEmpty(fe.FcmToken))
+                                             .ToListAsync();
+
+            // 3. Find engineers within the radius.
+            var engineersInRange = allEngineers.Where(fe =>
+                CalculateDistance(sr.Lat, sr.Lng, fe.CurrentLatitude, fe.CurrentLongitude) <= radiusKm
+            ).ToList();
+
+            if (engineersInRange.Any())
+            {
+                // 4. Send notifications
+                var token = engineersInRange.Select(fe => fe.FcmToken).FirstOrDefault();
+                var title = "New Service Request";
+                var body = $"A new service request is available at {sr.BranchName}.";
+
+                await _fcmNotificationService.SendNotificationAsync(token, title, body);
             }
-           
+        }
+
+        private double CalculateDistance(double lat1, double lon1, double lat2, double lon2)
+        {
+            const double R = 6371; // Radius of the Earth in kilometers
+            var dLat = ToRadians(lat2 - lat1);
+            var dLon = ToRadians(lon2 - lon1);
+            var a = Math.Sin(dLat / 2) * Math.Sin(dLat / 2) +
+                    Math.Cos(ToRadians(lat1)) * Math.Cos(ToRadians(lat2)) *
+                    Math.Sin(dLon / 2) * Math.Sin(dLon / 2);
+            var c = 2 * Math.Atan2(Math.Sqrt(a), Math.Sqrt(1 - a));
+            return R * c;
+        }
+
+        private double ToRadians(double angle)
+        {
+            return Math.PI * angle / 180.0;
+        }
+        // ------------------------------------
+    }
+}
