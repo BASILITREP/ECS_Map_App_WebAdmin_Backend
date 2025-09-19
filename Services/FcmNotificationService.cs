@@ -54,7 +54,7 @@ var credential = GoogleCredential.FromJson(serviceAccountJson)
     if (!response.IsSuccessStatusCode)
     {
         var error = await response.Content.ReadAsStringAsync();
-        Console.WriteLine($"Failed to send FCM notification: {error}"); // Add logging
+        Console.WriteLine($"Failed to send FCM notif: {error}"); // Add logging
         throw new Exception($"Failed to send FCM notification: {error}");
     }
     else
