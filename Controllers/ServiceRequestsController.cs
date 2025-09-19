@@ -4,7 +4,6 @@ using EcsFeMappingApi.Models;
 using EcsFeMappingApi.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
 
 
 namespace EcsFeMappingApi.Controllers
@@ -15,13 +14,11 @@ namespace EcsFeMappingApi.Controllers
     {
         private readonly AppDbContext _context;
         private readonly NotificationService _notificationService;
-        private readonly IConfiguration _configuration;
 
-        public ServiceRequestsController(AppDbContext context, NotificationService notificationService, IConfiguration configuration)
+        public ServiceRequestsController(AppDbContext context, NotificationService notificationService)
         {
             _context = context;
             _notificationService = notificationService;
-            _configuration = configuration;
         }
 
         // GET: api/ServiceRequests
@@ -53,57 +50,51 @@ namespace EcsFeMappingApi.Controllers
 
         // POST: api/ServiceRequests
         [HttpPost]
-public async Task<ActionResult<ServiceRequest>> PostServiceRequest(ServiceRequest serviceRequest)
-{
-    try
-    {
-        // Check if the branch already exists
-        var existingBranch = await _context.Branches.FindAsync(serviceRequest.BranchId);
-        if (existingBranch != null)
+        public async Task<ActionResult<ServiceRequest>> PostServiceRequest(ServiceRequest serviceRequest)
         {
-            // Associate the existing branch with the service request
+            // Check if the branch already exists
+            var existingBranch = await _context.Branches.FindAsync(serviceRequest.BranchId);
+            if (existingBranch == null)
+            {
+                return NotFound($"Branch with ID {serviceRequest.BranchId} not found.");
+            }
+
+            // Detach any branch entity that might have come with the request
+            if (serviceRequest.Branch != null && _context.Entry(serviceRequest.Branch).State != EntityState.Detached)
+            {
+                _context.Entry(serviceRequest.Branch).State = EntityState.Detached;
+            }
+
+            // Use the existing branch reference
             serviceRequest.Branch = existingBranch;
+
+            // Set any missing required fields
+            if (string.IsNullOrEmpty(serviceRequest.Status))
+            {
+                serviceRequest.Status = "pending";
+            }
+
+            if (serviceRequest.CreatedAt == default)
+            {
+                serviceRequest.CreatedAt = DateTime.UtcNow;
+            }
+
+            if (serviceRequest.UpdatedAt == default)
+            {
+                serviceRequest.UpdatedAt = DateTime.UtcNow;
+            }
+
+            // Set ID to 0 to ensure it's treated as a new entity
+            serviceRequest.Id = 0;
+
+            _context.ServiceRequests.Add(serviceRequest);
+            await _context.SaveChangesAsync();
+
+            // Send notification about the new service request
+            await _notificationService.SendNewServiceRequestNotification(serviceRequest);
+
+            return CreatedAtAction("GetServiceRequest", new { id = serviceRequest.Id }, serviceRequest);
         }
-        else
-        {
-            // If no branch exists, add the new branch
-            _context.Branches.Add(serviceRequest.Branch);
-        }
-
-        // Save the service request to the database
-        _context.ServiceRequests.Add(serviceRequest);
-        await _context.SaveChangesAsync();
-
-        // Send notification to field engineers
-        var fieldEngineers = await _context.FieldEngineers
-            .Where(fe => !string.IsNullOrEmpty(fe.FcmToken)) // Use FcmToken instead of OneSignalPlayerId
-            .ToListAsync();
-
-        var fcmService = new FcmNotificationService(_configuration);
-        foreach (var engineer in fieldEngineers)
-        {
-            Console.WriteLine($"Sending notification to Field Engineer: {engineer.Name}, FCM Token: {engineer.FcmToken}");
-            await fcmService.SendNotificationAsync(
-                        engineer.FcmToken, // Use FcmToken here
-                        "New Service Request",
-                        $"A new service request has been created for {serviceRequest.Branch?.Name ?? "Unknown location"}",
-                        new Dictionary<string, string>
-                        {
-                    { "type", "new_service_request" },
-                    { "serviceRequestId", serviceRequest.Id.ToString() },
-                    { "branchName", serviceRequest.Branch?.Name ?? "Unknown" },
-                    { "branchId", serviceRequest.BranchId.ToString() }
-                        }
-                    );
-        }
-
-        return CreatedAtAction("GetServiceRequest", new { id = serviceRequest.Id }, serviceRequest);
-    }
-    catch (Exception ex)
-    {
-        return BadRequest(new { error = ex.Message });
-    }
-}
 
         // POST: api/ServiceRequests/5/accept
         [HttpPost("{id}/accept")]
@@ -171,11 +162,11 @@ public async Task<ActionResult<ServiceRequest>> PostServiceRequest(ServiceReques
             }
             else
             {
-                serviceRequest.FieldEngineerId = id;
+                serviceRequest.FieldEngineerId = id;   
                 return Ok(await _context.SaveChangesAsync());
             }
         }
         
-        
     }
             }
+           

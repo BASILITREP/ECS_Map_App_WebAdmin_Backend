@@ -182,42 +182,11 @@ namespace EcsFeMappingApi.Controllers
             }
         }
 
-        [HttpPost("{id}/fcm-token")]
-public async Task<IActionResult> UpdateFcmToken(int id, [FromBody] UpdateFcmTokenRequest request)
-{
-    try
-    {
-        var fieldEngineer = await _context.FieldEngineers.FindAsync(id);
-        if (fieldEngineer == null)
-        {
-            return NotFound("Field engineer not found.");
-        }
-
-        fieldEngineer.FcmToken = request.FcmToken; // Save the FCM token
-        fieldEngineer.UpdatedAt = DateTime.UtcNow;
-
-        await _context.SaveChangesAsync();
-
-        return Ok(new { message = "FCM token updated successfully" });
-    }
-    catch (Exception ex)
-    {
-        return BadRequest(new { error = ex.Message });
-    }
-}
-
-public class UpdateFcmTokenRequest
-{
-    public string FcmToken { get; set; }
-}
-
         private bool FieldEngineerExists(int id)
         {
             return _context.FieldEngineers.Any(e => e.Id == id);
         }
     }
-
-    
 
     public class UpdateLocationDto
     {
