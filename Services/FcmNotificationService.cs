@@ -35,8 +35,14 @@ public class FcmNotificationService
     };
 
     var jsonMessage = JsonSerializer.Serialize(message);
-    var credential = GoogleCredential.FromFile(_configuration["Firebase:ServiceAccountJsonPath"])
-        .CreateScoped("https://www.googleapis.com/auth/firebase.messaging");
+    var serviceAccountJson = Environment.GetEnvironmentVariable("FIREBASE_SERVICE_ACCOUNT");
+if (string.IsNullOrEmpty(serviceAccountJson))
+{
+    throw new Exception("Firebase service account JSON is not configured.");
+}
+
+var credential = GoogleCredential.FromJson(serviceAccountJson)
+    .CreateScoped("https://www.googleapis.com/auth/firebase.messaging");
 
     var token = await credential.UnderlyingCredential.GetAccessTokenForRequestAsync();
 
