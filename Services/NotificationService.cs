@@ -108,6 +108,10 @@ namespace EcsFeMappingApi.Services
             await _hubContext.Clients.All.SendAsync("CoordinateUpdate", coordinateData);
         }
 
-        
+        public async Task SendServiceRequestUpdate(ServiceRequest serviceRequest)
+        {
+            Console.WriteLine($"Broadcasting service request update: {serviceRequest.Id}");
+            await _hubContext.Clients.All.SendAsync("ReceiveServiceRequestUpdate", serviceRequest);
+        }
     }
 }

@@ -100,36 +100,37 @@ namespace EcsFeMappingApi.Controllers
 
         // POST: api/ServiceRequests/5/accept
         [HttpPost("{id}/accept")]
-        public async Task<IActionResult> AcceptServiceRequest(int id, [FromBody] AcceptRequest payload)
-        {
-            var serviceRequest = await _context.ServiceRequests.FindAsync(id);
-            if (serviceRequest == null)
-            {
-                return NotFound("Service request not found.");
-            }
+public async Task<IActionResult> AcceptServiceRequest(int id, [FromBody] AcceptRequest payload)
+{
+    var serviceRequest = await _context.ServiceRequests.FindAsync(id);
+    if (serviceRequest == null)
+    {
+        return NotFound();
+    }
 
-            if (serviceRequest.Status != "pending")
-            {
-                return BadRequest("Service request is not pending.");
-            }
+    if (serviceRequest.Status != "pending")
+    {
+        return BadRequest("Service request is not pending.");
+    }
 
-            var fieldEngineer = await _context.FieldEngineers.FindAsync(payload.FieldEngineerId);
-            if (fieldEngineer == null)
-            {
-                return NotFound("Field engineer not found.");
-            }
+    var fieldEngineer = await _context.FieldEngineers.FindAsync(payload.FieldEngineerId);
+    if (fieldEngineer == null)
+    {
+        return NotFound("Field engineer not found.");
+    }
 
-            serviceRequest.Status = "accepted";
-            serviceRequest.AcceptedAt = DateTime.UtcNow;
-            serviceRequest.FieldEngineerId = payload.FieldEngineerId;
+    serviceRequest.Status = "accepted";
+    serviceRequest.FieldEngineerId = payload.FieldEngineerId;
+    serviceRequest.UpdatedAt = DateTime.UtcNow;
+    
 
-            await _context.SaveChangesAsync();
+    await _context.SaveChangesAsync();
 
-            await _notificationService.SendServiceRequestUpdate(serviceRequest);
+    // Emit SignalR event
+    await _notificationService.SendServiceRequestUpdate(serviceRequest);
 
-            return Ok();
-        }
-
+    return Ok(serviceRequest);
+}
         private bool ServiceRequestModelExists(int id)
         {
             return _context.ServiceRequests.Any(e => e.Id == id);
