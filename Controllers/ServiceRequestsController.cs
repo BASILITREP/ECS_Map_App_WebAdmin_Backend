@@ -100,38 +100,68 @@ namespace EcsFeMappingApi.Controllers
 
         // POST: api/ServiceRequests/5/accept
         [HttpPost("{id}/accept")]
-public async Task<IActionResult> AcceptServiceRequest(int id, [FromBody] AcceptRequest payload)
-{
-    var serviceRequest = await _context.ServiceRequests.FindAsync(id);
-    if (serviceRequest == null)
-    {
-        return NotFound();
-    }
+        public async Task<IActionResult> AcceptServiceRequest(int id, [FromBody] AcceptRequest payload)
+        {
+            var serviceRequest = await _context.ServiceRequests
+                                             .Include(sr => sr.Branch) // Eager load the branch
+                                             .FirstOrDefaultAsync(sr => sr.Id == id);
+            if (serviceRequest == null)
+            {
+                return NotFound();
+            }
 
-    if (serviceRequest.Status != "pending")
-    {
-        return BadRequest("Service request is not pending.");
-    }
+            if (serviceRequest.Status != "pending")
+            {
+                return BadRequest("Service request is not pending.");
+            }
 
-    var fieldEngineer = await _context.FieldEngineers.FindAsync(payload.FieldEngineerId);
-    if (fieldEngineer == null)
-    {
-        return NotFound("Field engineer not found.");
-    }
+            var fieldEngineer = await _context.FieldEngineers.FindAsync(payload.FieldEngineerId);
+            if (fieldEngineer == null)
+            {
+                return NotFound("Field engineer not found.");
+            }
 
-    serviceRequest.Status = "accepted";
-    serviceRequest.FieldEngineerId = payload.FieldEngineerId;
-    serviceRequest.UpdatedAt = DateTime.UtcNow;
-    
+            // 1. Update the Service Request
+            serviceRequest.Status = "accepted";
+            serviceRequest.FieldEngineerId = payload.FieldEngineerId;
+            serviceRequest.UpdatedAt = DateTime.UtcNow;
 
-    await _context.SaveChangesAsync();
+            // 2. Create a new Route object to be broadcasted
+            // This object structure should match what your frontend expects (HomePage.tsx -> OngoingRoute)
+            var newRoute = new
+            {
+                Id = DateTime.Now.Ticks, // A temporary unique ID for the client
+                FeId = fieldEngineer.Id,
+                FeName = fieldEngineer.Name,
+                BranchId = serviceRequest.Branch.Id,
+                BranchName = serviceRequest.Branch.Name,
+                StartTime = DateTime.Now.ToString("HH:mm"),
+                Status = "in-progress",
 
-    // Emit SignalR event
-    await _notificationService.SendServiceRequestUpdate(serviceRequest);
+                // Include coordinates so the frontend doesn't need to look them up
+                FeLat = fieldEngineer.CurrentLatitude,
+                FeLng = fieldEngineer.CurrentLongitude,
+                BranchLat = serviceRequest.Branch.Latitude,
+                BranchLng = serviceRequest.Branch.Longitude,
 
-    return Ok(serviceRequest);
-}
-        private bool ServiceRequestModelExists(int id)
+                // Placeholder values that the web app will calculate
+                EstimatedArrival = "Calculating...",
+                Distance = "Calculating...",
+                Duration = "Calculating...",
+                Price = "Calculating...",
+                RouteSteps = new List<object>()
+            };
+
+            // 3. Save changes to the database
+            await _context.SaveChangesAsync();
+
+            // 4. Broadcast TWO separate, specific events via SignalR
+            await _notificationService.SendServiceRequestUpdate(serviceRequest); // This tells clients to remove the pending SR
+            await _notificationService.SendNewRoute(newRoute); // This tells clients to add a new route card
+
+            return Ok(serviceRequest);
+        } 
+       private bool ServiceRequestModelExists(int id)
         {
             return _context.ServiceRequests.Any(e => e.Id == id);
         }

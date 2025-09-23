@@ -113,5 +113,12 @@ namespace EcsFeMappingApi.Services
             Console.WriteLine($"Broadcasting service request update: {serviceRequest.Id}");
             await _hubContext.Clients.All.SendAsync("ReceiveServiceRequestUpdate", serviceRequest);
         }
+
+        public async Task SendNewRoute(object newRoute)
+        {
+            Console.WriteLine($"Broadcasting new route: {JsonSerializer.Serialize(newRoute)}");
+            await _hubContext.Clients.All.SendAsync("ReceiveNewRoute", newRoute);
+        }
+        
     }
 }
