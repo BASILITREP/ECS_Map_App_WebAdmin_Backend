@@ -119,6 +119,18 @@ namespace EcsFeMappingApi.Services
             Console.WriteLine($"Broadcasting new route: {JsonSerializer.Serialize(newRoute)}");
             await _hubContext.Clients.All.SendAsync("ReceiveNewRoute", newRoute);
         }
+
+        public async Task SendRouteCompletionNotification(ServiceRequest serviceRequest)
+        {
+            if (serviceRequest.FieldEngineer == null) return;
+
+            await SendNotificationToEngineers(
+                "Route Completed",
+                $"Service request for {serviceRequest.BranchName} has been completed.",
+                new List<FieldEngineer> { serviceRequest.FieldEngineer },
+                new { serviceRequestId = serviceRequest.Id }
+            );
+        }
         
     }
 }

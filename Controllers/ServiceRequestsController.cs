@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net.Http.Headers;
 using System.Threading.Tasks;
 using EcsFeMappingApi.Data;
 using EcsFeMappingApi.Models;
@@ -160,8 +161,8 @@ namespace EcsFeMappingApi.Controllers
             await _notificationService.SendNewRoute(newRoute); // This tells clients to add a new route card
 
             return Ok(serviceRequest);
-        } 
-       private bool ServiceRequestModelExists(int id)
+        }
+        private bool ServiceRequestModelExists(int id)
         {
             return _context.ServiceRequests.Any(e => e.Id == id);
         }
@@ -201,27 +202,27 @@ namespace EcsFeMappingApi.Controllers
 
         // --- Helper Method for Notifications ---
         private async Task NotifyFieldEngineers(ServiceRequest sr)
-{
-    const double radiusKm = 10.0;
+        {
+            const double radiusKm = 10.0;
 
-    var allEngineers = await _context.FieldEngineers
-                                     .Where(fe => fe.Status != "Inactive" && !string.IsNullOrEmpty(fe.FcmToken))
-                                     .ToListAsync();
+            var allEngineers = await _context.FieldEngineers
+                                             .Where(fe => fe.Status != "Inactive" && !string.IsNullOrEmpty(fe.FcmToken))
+                                             .ToListAsync();
 
-    var engineersInRange = allEngineers.Where(fe =>
-        CalculateDistance(sr.Lat, sr.Lng, fe.CurrentLatitude, fe.CurrentLongitude) <= radiusKm
-    ).ToList();
+            var engineersInRange = allEngineers.Where(fe =>
+                CalculateDistance(sr.Lat, sr.Lng, fe.CurrentLatitude, fe.CurrentLongitude) <= radiusKm
+            ).ToList();
 
-    if (engineersInRange.Any())
-    {
-        var tokens = engineersInRange.Select(fe => fe.FcmToken).ToList();
-        var title = "New Service Request";
-        var body = $"A new service request is available at {sr.BranchName}.";
+            if (engineersInRange.Any())
+            {
+                var tokens = engineersInRange.Select(fe => fe.FcmToken).ToList();
+                var title = "New Service Request";
+                var body = $"A new service request is available at {sr.BranchName}.";
 
-        // Use the new method to send to multiple devices
-        await _fcmNotificationService.SendNotificationToMultipleDevicesAsync(tokens, title, body);
-    }
-}
+                // Use the new method to send to multiple devices
+                await _fcmNotificationService.SendNotificationToMultipleDevicesAsync(tokens, title, body);
+            }
+        }
 
         private double CalculateDistance(double lat1, double lon1, double lat2, double lon2)
         {
@@ -239,6 +240,29 @@ namespace EcsFeMappingApi.Controllers
         {
             return Math.PI * angle / 180.0;
         }
-        // ------------------------------------
+        [HttpPost("{id}/complete")]
+        public async Task<IActionResult> CompleteServiceRequest(int id)
+        {
+            var serviceRequest = await _context.ServiceRequests.FindAsync(id);
+            if (serviceRequest == null)
+            {
+                return NotFound("Service request not found.");
+            }
+            if (serviceRequest.Status != "accepted")
+            {
+                return BadRequest("Service request is not in an accepted state.");
+            }
+
+            //update status
+            serviceRequest.Status = "completed";
+            serviceRequest.UpdatedAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
+
+            // Notify clients to remove the completed service request
+            await _notificationService.SendRouteCompletionNotification(serviceRequest);
+
+            return Ok(new { message = "Service request marked as completed." });
+        }
+
     }
 }
