@@ -34,6 +34,7 @@ builder.Services.AddSignalR();
 builder.Services.AddScoped<EcsFeMappingApi.Services.NotificationService>();
 builder.Services.AddScoped<EcsFeMappingApi.Services.AuthService>();
 builder.Services.AddScoped<FcmNotificationService>();
+builder.Services.AddHostedService<ActivityProcessingService>();
 
 // Configure MySQL
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");

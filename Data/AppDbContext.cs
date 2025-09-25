@@ -12,7 +12,9 @@ namespace EcsFeMappingApi.Data
         public DbSet<Branch> Branches { get; set; }
         public DbSet<FieldEngineer> FieldEngineers { get; set; }
         public DbSet<ServiceRequest> ServiceRequests { get; set; }
-        public DbSet<UserModel> Users { get; set; }
+        public DbSet<UserModel> Users { get; set; } 
+        public DbSet<ActivityEvent> ActivityEvents { get; set; }
+        public DbSet<LocationPoint> LocationPoints { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
