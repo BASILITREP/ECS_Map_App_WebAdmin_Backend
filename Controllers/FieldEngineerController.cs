@@ -24,6 +24,23 @@ namespace EcsFeMappingApi.Controllers
             _hubContext = hubContext;
         }
 
+        [HttpGet("{id}/activity")]
+        public async Task<ActionResult<IEnumerable<ActivityEvent>>> GetFieldEngineerActivity(int id)
+        {
+            var activities = await _context.ActivityEvents
+                .Where(e => e.FieldEngineerId == id)
+                .OrderByDescending(e => e.StartTime)
+                .Take(50) // Optionally limit to the last 50 events for performance
+                .ToListAsync();
+
+            if (activities == null)
+            {
+                return NotFound();
+            }
+
+            return Ok(activities);
+        }
+
         // GET: api/FieldEngineers
         [HttpGet]
         public async Task<ActionResult<IEnumerable<FieldEngineer>>> GetFieldEngineers()
@@ -50,16 +67,16 @@ namespace EcsFeMappingApi.Controllers
         public async Task<ActionResult<FieldEngineer>> PostFieldEngineer(FieldEngineer fieldEngineer)
         {
             Console.WriteLine($"Creating new field engineer: {fieldEngineer.Name}");
-            
+
             _context.FieldEngineers.Add(fieldEngineer);
             var result = await _context.SaveChangesAsync();
-            
+
             Console.WriteLine($"Database changes saved: {result} rows affected");
             Console.WriteLine($"Field engineer ID after save: {fieldEngineer.Id}");
-            
+
             await _hubContext.Clients.All.SendAsync("ReceiveNewFieldEngineer", fieldEngineer);
             Console.WriteLine("SignalR notification sent for new field engineer");
-            
+
             return CreatedAtAction("GetFieldEngineer", new { id = fieldEngineer.Id }, fieldEngineer);
         }
 
@@ -188,6 +205,8 @@ namespace EcsFeMappingApi.Controllers
         }
     }
 
+
+
     public class UpdateLocationDto
     {
         public double Latitude { get; set; }
@@ -202,4 +221,5 @@ namespace EcsFeMappingApi.Controllers
         public double CurrentLatitude { get; set; }
         public double CurrentLongitude { get; set; }
     }
+    
 }
