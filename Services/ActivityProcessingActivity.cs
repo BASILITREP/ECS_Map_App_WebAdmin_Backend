@@ -55,9 +55,10 @@ public class ActivityProcessingService : IHostedService, IDisposable
             foreach (var engineerId in engineerIds)
             {
                 // Get all points for this engineer, ordered by time
+                 _logger.LogInformation($"Processing points for engineer {engineerId}"); 
                 var points = await context.LocationPoints
                     .Where(p => p.FieldEngineerId == engineerId)
-                    .OrderBy(p => p.Timestamp)
+                    // ...
                     .ToListAsync();
 
                 if (points.Count < 2) continue;
