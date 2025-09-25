@@ -40,83 +40,83 @@ public class ActivityProcessingService : IHostedService, IDisposable
     }
 
     private async Task ProcessActivities()
+{
+    using (var scope = _scopeFactory.CreateScope())
     {
-        using (var scope = _scopeFactory.CreateScope())
-        {
-            var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            _logger.LogInformation("Processing raw location points...");
+        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        _logger.LogInformation("Processing raw location points...");
 
-            // Get all engineers who have unprocessed points
-            var engineerIds = await context.LocationPoints
-                .Select(p => p.FieldEngineerId)
-                .Distinct()
+        var engineerIds = await context.LocationPoints
+            .Select(p => p.FieldEngineerId)
+            .Distinct()
+            .ToListAsync();
+
+        foreach (var engineerId in engineerIds)
+        {
+            _logger.LogInformation($"Checking points for engineer {engineerId}");
+
+            // Get all points for this engineer, ORDERED BY TIME. This is the critical fix.
+            var points = await context.LocationPoints
+                .Where(p => p.FieldEngineerId == engineerId)
+                .OrderBy(p => p.Timestamp)
                 .ToListAsync();
 
-            foreach (var engineerId in engineerIds)
+            if (points.Count < 2) continue;
+            
+            _logger.LogInformation($"Found {points.Count} points to process for engineer {engineerId}.");
+
+            // --- The rest of your algorithm remains the same ---
+            ActivityEvent? lastStop = null;
+            var currentCluster = new List<LocationPoint> { points.First() };
+            var newEvents = new List<ActivityEvent>();
+
+            for (int i = 1; i < points.Count; i++)
             {
-                // Get all points for this engineer, ordered by time
-                 _logger.LogInformation($"Processing points for engineer {engineerId}"); 
-                var points = await context.LocationPoints
-                    .Where(p => p.FieldEngineerId == engineerId)
-                    // ...
-                    .ToListAsync();
+                var currentPoint = points[i];
+                var lastPointInCluster = currentCluster.Last();
+                var distance = CalculateDistance(lastPointInCluster, currentPoint);
 
-                if (points.Count < 2) continue;
-
-                // --- This is the core algorithm for detecting stops and drives ---
-                ActivityEvent? lastStop = null;
-                var currentCluster = new List<LocationPoint> { points.First() };
-
-                for (int i = 1; i < points.Count; i++)
+                if (distance <= STOP_CLUSTER_RADIUS_METERS)
                 {
-                    var currentPoint = points[i];
-                    var lastPointInCluster = currentCluster.Last();
-
-                    var distance = CalculateDistance(lastPointInCluster, currentPoint);
-
-                    if (distance <= STOP_CLUSTER_RADIUS_METERS)
-                    {
-                        // Point is close to the cluster, add it
-                        currentCluster.Add(currentPoint);
-                    }
-                    else
-                    {
-                        // Point is far away, the previous cluster has ended.
-                        // Let's process the cluster we just finished.
-                        var clusterDuration = currentCluster.Last().Timestamp - currentCluster.First().Timestamp;
-                        
-                        if (clusterDuration.TotalMinutes >= MIN_STOP_DURATION_MINUTES)
-                        {
-                            // It's a valid stop!
-                            var stopEvent = await CreateStopEvent(currentCluster, engineerId);
-                            context.ActivityEvents.Add(stopEvent);
-                            lastStop = stopEvent;
-                        }
-
-                        // The points between the last real stop and this new one form a DRIVE.
-                        var drivePoints = points.Where(p => 
-                            (lastStop == null || p.Timestamp > lastStop.EndTime) && 
-                            p.Timestamp <= currentCluster.First().Timestamp
-                        ).ToList();
-                        
-                        if(drivePoints.Any())
-                        {
-                            var driveEvent = CreateDriveEvent(drivePoints, engineerId);
-                            context.ActivityEvents.Add(driveEvent);
-                        }
-                        
-                        // Start a new cluster with the current point
-                        currentCluster = new List<LocationPoint> { currentPoint };
-                    }
+                    currentCluster.Add(currentPoint);
                 }
-                
-                // After the loop, save all new events and delete the raw points
-                await context.SaveChangesAsync();
-                context.LocationPoints.RemoveRange(points); // Clean up processed points
-                await context.SaveChangesAsync();
+                else
+                {
+                    var clusterDuration = currentCluster.Last().Timestamp - currentCluster.First().Timestamp;
+                    
+                    if (clusterDuration.TotalMinutes >= MIN_STOP_DURATION_MINUTES)
+                    {
+                        var stopEvent = await CreateStopEvent(currentCluster, engineerId);
+                        newEvents.Add(stopEvent);
+                        lastStop = stopEvent;
+                    }
+
+                    var drivePoints = points.Where(p => 
+                        (lastStop == null || p.Timestamp > lastStop.EndTime) && 
+                        p.Timestamp <= currentCluster.First().Timestamp
+                    ).ToList();
+                    
+                    if(drivePoints.Any())
+                    {
+                        var driveEvent = CreateDriveEvent(drivePoints, engineerId);
+                        newEvents.Add(driveEvent);
+                    }
+                    
+                    currentCluster = new List<LocationPoint> { currentPoint };
+                }
             }
+            
+            if (newEvents.Any())
+            {
+                await context.ActivityEvents.AddRangeAsync(newEvents);
+            }
+            
+            context.LocationPoints.RemoveRange(points);
+            await context.SaveChangesAsync();
+            _logger.LogInformation($"Processed and cleaned up {points.Count} points for engineer {engineerId}. Created {newEvents.Count} new activity events.");
         }
     }
+}
 
     private async Task<ActivityEvent> CreateStopEvent(List<LocationPoint> cluster, int engineerId)
     {
