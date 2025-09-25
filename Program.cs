@@ -97,8 +97,16 @@ var app = builder.Build();
 // Auto-create database tables on startup
 using (var scope = app.Services.CreateScope())
 {
-    var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    dbContext.Database.Migrate();
+    try
+    {
+        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        await context.Database.EnsureCreatedAsync();
+        Console.WriteLine("✅ Railway database tables created successfully!");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"❌ Database creation error: {ex.Message}");
+    }
 }
 
 // Configure the HTTP request pipeline.

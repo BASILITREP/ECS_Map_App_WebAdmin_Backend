@@ -12,8 +12,8 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace EcsFeMappingApi.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20250915085539_AddUserModel")]
-    partial class AddUserModel
+    [Migration("20250925065001_InitialProductionCreate")]
+    partial class InitialProductionCreate
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -24,6 +24,52 @@ namespace EcsFeMappingApi.Migrations
                 .HasAnnotation("Relational:MaxIdentifierLength", 64);
 
             MySqlModelBuilderExtensions.AutoIncrementColumns(modelBuilder);
+
+            modelBuilder.Entity("EcsFeMappingApi.Models.ActivityEvent", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Address")
+                        .HasColumnType("longtext");
+
+                    b.Property<double?>("DistanceKm")
+                        .HasColumnType("double");
+
+                    b.Property<int>("DurationMinutes")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("EndTime")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int>("FieldEngineerId")
+                        .HasColumnType("int");
+
+                    b.Property<double?>("Latitude")
+                        .HasColumnType("double");
+
+                    b.Property<string>("LocationName")
+                        .HasColumnType("longtext");
+
+                    b.Property<double?>("Longitude")
+                        .HasColumnType("double");
+
+                    b.Property<DateTime>("StartTime")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<double?>("TopSpeedKmh")
+                        .HasColumnType("double");
+
+                    b.Property<int>("Type")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("ActivityEvents");
+                });
 
             modelBuilder.Entity("EcsFeMappingApi.Models.Branch", b =>
                 {
@@ -77,14 +123,17 @@ namespace EcsFeMappingApi.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime(6)");
 
-                    b.Property<double?>("CurrentLatitude")
+                    b.Property<double>("CurrentLatitude")
                         .HasColumnType("double");
 
-                    b.Property<double?>("CurrentLongitude")
+                    b.Property<double>("CurrentLongitude")
                         .HasColumnType("double");
 
                     b.Property<string>("Email")
                         .IsRequired()
+                        .HasColumnType("longtext");
+
+                    b.Property<string>("FcmToken")
                         .HasColumnType("longtext");
 
                     b.Property<bool>("IsAvailable")
@@ -111,6 +160,34 @@ namespace EcsFeMappingApi.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("FieldEngineers");
+                });
+
+            modelBuilder.Entity("EcsFeMappingApi.Models.LocationPoint", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("FieldEngineerId")
+                        .HasColumnType("int");
+
+                    b.Property<double>("Latitude")
+                        .HasColumnType("double");
+
+                    b.Property<double>("Longitude")
+                        .HasColumnType("double");
+
+                    b.Property<double?>("Speed")
+                        .HasColumnType("double");
+
+                    b.Property<DateTime>("Timestamp")
+                        .HasColumnType("datetime(6)");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("LocationPoints");
                 });
 
             modelBuilder.Entity("EcsFeMappingApi.Models.ServiceRequest", b =>
@@ -206,8 +283,8 @@ namespace EcsFeMappingApi.Migrations
                         new
                         {
                             Id = 1,
-                            CreatedAt = new DateTime(2025, 9, 15, 8, 55, 36, 285, DateTimeKind.Utc).AddTicks(1463),
-                            PasswordHash = new byte[] { 36, 50, 97, 36, 49, 49, 36, 114, 108, 104, 71, 56, 53, 106, 83, 114, 70, 106, 56, 66, 57, 109, 79, 57, 89, 83, 109, 48, 101, 54, 110, 53, 111, 57, 68, 78, 54, 90, 119, 117, 82, 68, 107, 67, 117, 115, 110, 49, 89, 101, 107, 116, 53, 122, 50, 73, 68, 118, 48, 46 },
+                            CreatedAt = new DateTime(2025, 9, 25, 6, 49, 59, 378, DateTimeKind.Utc).AddTicks(5673),
+                            PasswordHash = new byte[] { 36, 50, 97, 36, 49, 49, 36, 82, 82, 97, 101, 100, 99, 106, 122, 114, 110, 56, 104, 47, 83, 49, 78, 109, 109, 122, 116, 99, 117, 74, 109, 65, 76, 88, 97, 78, 116, 76, 49, 114, 102, 82, 87, 103, 54, 120, 117, 115, 112, 103, 100, 102, 49, 49, 47, 106, 79, 108, 119, 117 },
                             Role = "Admin",
                             Username = "admin"
                         });
