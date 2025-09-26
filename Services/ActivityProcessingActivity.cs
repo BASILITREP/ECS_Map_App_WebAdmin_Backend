@@ -1,6 +1,8 @@
 using EcsFeMappingApi.Data;
 using EcsFeMappingApi.Models;
 using Microsoft.EntityFrameworkCore;
+using System.Net.Http;
+using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -14,15 +16,18 @@ public class ActivityProcessingService : IHostedService, IDisposable
     private readonly ILogger<ActivityProcessingService> _logger;
     private readonly IServiceScopeFactory _scopeFactory;
     private Timer? _timer;
+    private readonly HttpClient _httpClient;
 
     // --- Configuration Constants (You can fine-tune these) ---
     private const double STOP_CLUSTER_RADIUS_METERS = 50; // Points within 50m are part of a potential stop
     private const int MIN_STOP_DURATION_MINUTES = 1;      // Must stay for at least 1 minute to be a "stop"
+    private const string MAPBOX_API_KEY = "pk.eyJ1IjoiYmFzaWwxLTIzIiwiYSI6ImNtZWFvNW43ZTA0ejQycHBtd3dkMHJ1bnkifQ.Y-IlM-vQAlaGr7pVQnug3Q"; // Your Mapbox key
 
-    public ActivityProcessingService(ILogger<ActivityProcessingService> logger, IServiceScopeFactory scopeFactory)
+     public ActivityProcessingService(ILogger<ActivityProcessingService> logger, IServiceScopeFactory scopeFactory, IHttpClientFactory httpClientFactory)
     {
         _logger = logger;
         _scopeFactory = scopeFactory;
+        _httpClient = httpClientFactory.CreateClient(); // NEW: Create the client
     }
 
     public Task StartAsync(CancellationToken cancellationToken)
@@ -193,13 +198,44 @@ public class ActivityProcessingService : IHostedService, IDisposable
     }
     
     private async Task<(string LocationName, string Address)> ReverseGeocodeAsync(double lat, double lng)
+{
+    // The URL for the Mapbox Geocoding API
+    var url = $"https://api.mapbox.com/geocoding/v5/mapbox.places/{lng},{lat}.json?types=poi,address&access_token={MAPBOX_API_KEY}";
+
+    try
     {
-        // In a real app, you would call the Mapbox Geocoding API here.
-        // For now, we'll return a placeholder.
-        var url = $"https://api.mapbox.com/geocoding/v5/mapbox.places/{lng},{lat}.json?access_token=pk.eyJ1IjoiYmFzaWwxLTIzIiwiYSI6ImNtZWFvNW43ZTA0ejQycHBtd3dkMHJ1bnkifQ.Y-IlM-vQAlaGr7pVQnug3Q";
-        await Task.Delay(100); // Simulate network call
-        return ($"Location near {lat:F3}, {lng:F3}", "Address not available");
+        var response = await _httpClient.GetAsync(url);
+        if (!response.IsSuccessStatusCode)
+        {
+            _logger.LogError($"Mapbox API error: {response.StatusCode}");
+            return ($"Location near {lat:F3}, {lng:F3}", "Address lookup failed");
+        }
+
+        var jsonString = await response.Content.ReadAsStringAsync();
+        using (var jsonDoc = JsonDocument.Parse(jsonString))
+        {
+            var features = jsonDoc.RootElement.GetProperty("features");
+
+            if (features.GetArrayLength() > 0)
+            {
+                // Get the first, most relevant result
+                var firstFeature = features[0];
+                string placeName = firstFeature.GetProperty("text").GetString() ?? "Unknown Place";
+                string fullAddress = firstFeature.GetProperty("place_name").GetString() ?? "Address not available";
+                
+                _logger.LogInformation($"Geocoded ({lat},{lng}) to: {placeName}");
+                return (placeName, fullAddress);
+            }
+        }
     }
+    catch (Exception ex)
+    {
+        _logger.LogError(ex, $"Exception during reverse geocoding for ({lat},{lng})");
+    }
+
+    // Fallback if anything goes wrong
+    return ($"Location near {lat:F3}, {lng:F3}", "Address not available");
+}
 
 
     public Task StopAsync(CancellationToken cancellationToken)
