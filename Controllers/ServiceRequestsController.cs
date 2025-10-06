@@ -17,7 +17,7 @@ namespace EcsFeMappingApi.Controllers
     {
         private readonly AppDbContext _context;
         private readonly NotificationService _notificationService;
-        private readonly FcmNotificationService _fcmNotificationService; // Assuming you have this service
+        private readonly FcmNotificationService _fcmNotificationService; 
 
         public ServiceRequestsController(AppDbContext context, NotificationService notificationService, FcmNotificationService fcmNotificationService)
         {
@@ -122,16 +122,15 @@ namespace EcsFeMappingApi.Controllers
                 return NotFound("Field engineer not found.");
             }
 
-            // 1. Update the Service Request
+        
             serviceRequest.Status = "accepted";
             serviceRequest.FieldEngineerId = payload.FieldEngineerId;
             serviceRequest.UpdatedAt = DateTime.UtcNow;
 
-            // 2. Create a new Route object to be broadcasted
-            // This object structure should match what your frontend expects (HomePage.tsx -> OngoingRoute)
+           
             var newRoute = new
             {
-                Id = DateTime.Now.Ticks, // A temporary unique ID for the client
+                Id = DateTime.Now.Ticks, 
                 FeId = fieldEngineer.Id,
                 FeName = fieldEngineer.Name,
                 BranchId = serviceRequest.Branch.Id,
@@ -139,13 +138,11 @@ namespace EcsFeMappingApi.Controllers
                 StartTime = DateTime.Now.ToString("HH:mm"),
                 Status = "in-progress",
 
-                // Include coordinates so the frontend doesn't need to look them up
                 FeLat = fieldEngineer.CurrentLatitude,
                 FeLng = fieldEngineer.CurrentLongitude,
                 BranchLat = serviceRequest.Branch.Latitude,
                 BranchLng = serviceRequest.Branch.Longitude,
 
-                // Placeholder values that the web app will calculate
                 EstimatedArrival = "Calculating...",
                 Distance = "Calculating...",
                 Duration = "Calculating...",
@@ -153,12 +150,12 @@ namespace EcsFeMappingApi.Controllers
                 RouteSteps = new List<object>()
             };
 
-            // 3. Save changes to the database
+
             await _context.SaveChangesAsync();
 
-            // 4. Broadcast TWO separate, specific events via SignalR
-            await _notificationService.SendServiceRequestUpdate(serviceRequest); // This tells clients to remove the pending SR
-            await _notificationService.SendNewRoute(newRoute); // This tells clients to add a new route card
+
+            await _notificationService.SendServiceRequestUpdate(serviceRequest); 
+            await _notificationService.SendNewRoute(newRoute); 
 
             return Ok(serviceRequest);
         }
@@ -199,8 +196,6 @@ namespace EcsFeMappingApi.Controllers
                 return Ok(await _context.SaveChangesAsync());
             }
         }
-
-        // --- Helper Method for Notifications ---
         private async Task NotifyFieldEngineers(ServiceRequest sr)
         {
             const double radiusKm = 10.0;
@@ -219,7 +214,7 @@ namespace EcsFeMappingApi.Controllers
                 var title = "New Service Request";
                 var body = $"A new service request is available at {sr.BranchName}.";
 
-                // Use the new method to send to multiple devices
+            
                 await _fcmNotificationService.SendNotificationToMultipleDevicesAsync(tokens, title, body);
             }
         }

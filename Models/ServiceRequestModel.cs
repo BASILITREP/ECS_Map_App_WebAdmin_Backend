@@ -27,7 +27,7 @@ namespace EcsFeMappingApi.Models
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }
         public DateTime? AcceptedAt { get; set; }
-        public double CurrentRadiusKm { get; set; } = 5; // Default radius
+        public double CurrentRadiusKm { get; set; } = 5; 
     }
 
     public class ServiceRequestCreateDto
@@ -50,7 +50,7 @@ namespace EcsFeMappingApi.Models
         public DateTime CreatedAt { get; set; }
         public DateTime? AcceptedAt { get; set; }
 
-        // Add the FromEntity method
+      
         public static ServiceRequestDto FromEntity(ServiceRequest entity, FieldEngineer? fieldEngineer = null)
         {
             return new ServiceRequestDto

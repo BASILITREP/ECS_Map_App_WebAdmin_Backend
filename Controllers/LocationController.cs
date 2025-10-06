@@ -1,61 +1,63 @@
+// In Controllers/LocationController.cs
+
+using Microsoft.AspNetCore.Mvc;
 using EcsFeMappingApi.Data;
 using EcsFeMappingApi.Models;
-using Microsoft.AspNetCore.Mvc;
-using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using Microsoft.EntityFrameworkCore;
+using EcsFeMappingApi.Services; // Add this using directive
 
 namespace EcsFeMappingApi.Controllers
 {
-    public class LocationPointDto
-    {
-        public double Latitude { get; set; }
-        public double Longitude { get; set; }
-        public double? Speed { get; set; }
-        public DateTime Timestamp { get; set; }
-    }
-
-    public class LocationBatchDto
-    {
-        public int FieldEngineerId { get; set; }
-        public List<LocationPointDto> Points { get; set; } = new List<LocationPointDto>();
-    }
-
     [Route("api/[controller]")]
     [ApiController]
     public class LocationController : ControllerBase
     {
         private readonly AppDbContext _context;
-        public LocationController(AppDbContext context)
+        private readonly TripDetectionService _tripService; // Add this
+
+        // Inject the new service
+        public LocationController(AppDbContext context, TripDetectionService tripService)
         {
             _context = context;
+            _tripService = tripService;
         }
 
-         [HttpPost("batch")]
-        public async Task<IActionResult> PostBatch([FromBody] LocationBatchDto batchDto)
+        // GET: api/Location/{feId}
+        [HttpGet("{feId}")]
+        public async Task<ActionResult<IEnumerable<LocationPoint>>> GetLocationHistory(int feId)
         {
-            if (batchDto == null || batchDto.Points == null || batchDto.Points.Count == 0)
+            return await _context.LocationPoints
+                                 .Where(p => p.FieldEngineerId == feId)
+                                 .OrderByDescending(p => p.Timestamp)
+                                 .ToListAsync();
+        }
+
+        // POST: api/Location
+        [HttpPost]
+        public async Task<IActionResult> PostLocationPoints(List<LocationPoint> points)
+        {
+            if (points == null || !points.Any())
             {
-                return BadRequest("Batch data is empty or invalid.");
+                return BadRequest("No location points provided.");
             }
 
-            var locationPoints = new List<LocationPoint>();
-            foreach (var pointDto in batchDto.Points)
-            {
-                locationPoints.Add(new LocationPoint
-                {
-                    FieldEngineerId = batchDto.FieldEngineerId,
-                    Latitude = pointDto.Latitude,
-                    Longitude = pointDto.Longitude,
-                    Speed = pointDto.Speed,
-                    Timestamp = pointDto.Timestamp.ToUniversalTime() // Ensure UTC
-                });
-            }
+            // Use the service to process the points
+            await _tripService.ProcessLocationPoints(points);
 
-            await _context.LocationPoints.AddRangeAsync(locationPoints);
-            await _context.SaveChangesAsync();
+            return Ok();
+        }
 
-            return Ok(new { message = $"{locationPoints.Count} points received and saved." });
+        // Add a new endpoint to get trips
+        [HttpGet("trips/{feId}")]
+        public async Task<ActionResult<IEnumerable<TripModel>>> GetTrips(int feId)
+        {
+            return await _context.Trips
+                .Include(t => t.Path)
+                .Where(t => t.FieldEngineerId == feId)
+                .OrderByDescending(t => t.StartTime)
+                .ToListAsync();
         }
     }
 }

@@ -7,13 +7,10 @@ namespace EcsFeMappingApi.Models
         [Key]
         public int Id { get; set; }
 
-        [Required]
-        [MaxLength(50)]
-        public string? Username { get; set; }
+        public string Username { get; set; } = string.Empty;
 
-        [Required]
-        public byte[]? PasswordHash { get; set; }
-        public string Role { get; set; } = "Admin";
+        public string PasswordHash { get; set; } = string.Empty;
+        public string Role { get; set; } = string.Empty;
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         
     }

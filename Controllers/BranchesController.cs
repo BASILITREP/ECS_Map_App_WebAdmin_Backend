@@ -45,18 +45,36 @@ namespace EcsFeMappingApi.Controllers
             return branch;
         }
 
+        //GET: api/Branches/ContactPerson/{contactPerson}
+        [HttpGet("ContactPerson/{contactPerson}")]
+        public async Task<ActionResult<IEnumerable<Branch>>> GetBranchesByContactPerson(string contactPerson)
+        {
+            var branches = await _context.Branches
+                .Where(b => b.ContactPerson.Equals(contactPerson, StringComparison.OrdinalIgnoreCase))
+                .ToListAsync();
+
+            if (branches == null || branches.Count == 0)
+            {
+                return NotFound();
+            }
+            else
+            {
+                return Ok(branches);
+            }
+        }
+
         // POST: api/Branches
         [HttpPost]
-public async Task<ActionResult<Branch>> PostBranch(Branch branch)
-{
-    _context.Branches.Add(branch);
-    await _context.SaveChangesAsync();
+        public async Task<ActionResult<Branch>> PostBranch(Branch branch)
+        {
+            _context.Branches.Add(branch);
+            await _context.SaveChangesAsync();
 
-    // Broadcast the new branch via SignalR
-    await _hubContext.Clients.All.SendAsync("ReceiveNewBranch", branch);
+            // Broadcast the new branch via SignalR
+            await _hubContext.Clients.All.SendAsync("ReceiveNewBranch", branch);
 
-    return CreatedAtAction("GetBranch", new { id = branch.Id }, branch);
-}
+            return CreatedAtAction("GetBranch", new { id = branch.Id }, branch);
+        }
 
         // PUT: api/Branches/5
         [HttpPut("{id}")]

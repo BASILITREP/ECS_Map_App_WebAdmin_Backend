@@ -214,7 +214,7 @@ namespace EcsFeMappingApi.Controllers
         public bool? IsAvailable { get; set; }
     }
 
-    // Data Transfer Object
+
     public class LocationUpdateDto
     {
         public int Id { get; set; }

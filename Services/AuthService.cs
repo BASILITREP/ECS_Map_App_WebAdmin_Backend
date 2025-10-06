@@ -19,16 +19,30 @@ namespace EcsFeMappingApi.Services
             _configuration = configuration;
         }
 
+        //create user with hashed password
+        public UserModel CreateUser(string username, string password, string role)
+        {
+            var user = new UserModel
+            {
+                Username = username,
+                PasswordHash = BCrypt.Net.BCrypt.HashPassword(password),
+                Role = role,
+                CreatedAt = DateTime.UtcNow
+            };
+            _context.Users.Add(user);
+            return user;
+        }
+
         public async Task<UserModel?> ValidateUser(string username, string password)
         {
             var user = await _context.Users.FirstOrDefaultAsync(u => u.Username == username);
-            
+
             if (user == null)
                 return null;
-                
-            if (!BCrypt.Net.BCrypt.Verify(password, Encoding.UTF8.GetString(user.PasswordHash)))
+
+            if (!BCrypt.Net.BCrypt.Verify(password, user.PasswordHash))
                 return null;
-                
+
             return user;
         }
         
