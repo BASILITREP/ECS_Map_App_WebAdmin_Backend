@@ -12,6 +12,9 @@ namespace EcsFeMappingApi.Models
         public double Longitude { get; set; }
         public double? Speed { get; set; }
         public DateTime Timestamp { get; set; }
+        public string? Address { get; set; }
+        public double? Accuracy { get; set; }
+    
         
     }
 }
