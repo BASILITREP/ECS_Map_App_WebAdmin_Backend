@@ -132,7 +132,7 @@ namespace EcsFeMappingApi.Services
                             EndLongitude = currentPoint.Longitude,
                             EndAddress = address, // Map to original field
                             EndLocation = address,
-                            TripType = "MOVEMENT",
+                            TripType = "MOVEMENT", // New trip type
                             TotalDistance = distanceMeters / 1000.0, // Convert to km
                             // EndTime = null, // Ongoing until they stop
                         };
