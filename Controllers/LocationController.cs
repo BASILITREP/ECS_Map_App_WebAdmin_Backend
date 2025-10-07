@@ -50,14 +50,37 @@ namespace EcsFeMappingApi.Controllers
         }
 
         // Add a new endpoint to get trips
-        [HttpGet("trips/{feId}")]
-        public async Task<ActionResult<IEnumerable<TripModel>>> GetTrips(int feId)
+        // [HttpGet("trips/{feId}")]
+        // public async Task<ActionResult<IEnumerable<TripModel>>> GetTrips(int feId)
+        // {
+        //     return await _context.Trips
+        //         .Include(t => t.Path)
+        //         .Where(t => t.FieldEngineerId == feId)
+        //         .OrderByDescending(t => t.StartTime)
+        //         .ToListAsync();
+        // }
+
+        // ADD THIS METHOD to your LocationController:
+
+        [HttpGet("trips/{fieldEngineerId}")]
+        public async Task<ActionResult<IEnumerable<TripModel>>> GetFieldEngineerTrips(int fieldEngineerId)
         {
-            return await _context.Trips
-                .Include(t => t.Path)
-                .Where(t => t.FieldEngineerId == feId)
-                .OrderByDescending(t => t.StartTime)
-                .ToListAsync();
+            try
+            {
+                var trips = await _context.Trips
+                    .Where(t => t.FieldEngineerId == fieldEngineerId)
+                    .Include(t => t.Path)
+                    .OrderByDescending(t => t.StartTime)
+                    .Take(50) // Limit to recent 50 trips
+                    .ToListAsync();
+
+                return Ok(trips);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error fetching trips: {ex.Message}");
+                return StatusCode(500, "Internal server error");
+            }
         }
     }
 }
