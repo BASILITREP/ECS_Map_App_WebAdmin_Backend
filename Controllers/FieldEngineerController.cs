@@ -8,7 +8,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.SignalR;
 using EcsFeMappingApi.Services;
-
+    
 namespace EcsFeMappingApi.Controllers
 {
     [Route("api/[controller]")]
@@ -200,31 +200,65 @@ namespace EcsFeMappingApi.Controllers
         }
 
         [HttpPost("loginsync")]
-    public async Task<ActionResult<FieldEngineer>> LoginSync([FromBody] LoginSyncRequest request)
+public async Task<ActionResult<FieldEngineer>> LoginSync([FromBody] LoginSyncRequest request)
+{
+    try
     {
-        // Hanapin ang Field Engineer gamit ang UserId mula sa external API
+        // Find the Field Engineer using UserId from external API
         var fieldEngineer = await _context.FieldEngineers
             .FirstOrDefaultAsync(fe => fe.Id == request.UserId);
 
         if (fieldEngineer == null)
         {
-            // Kung wala pa siya sa database mo, pwede kang gumawa ng bago
-            // (For now, mag-return muna tayo ng not found)
-            return NotFound($"Field engineer with ID {request.UserId} not found in this system.");
+            // User doesn't exist in our system, so create them with data from boss's API
+            fieldEngineer = new FieldEngineer
+            {
+                Id = request.UserId,
+                Name = $"{request.FirstName} {request.LastName}",
+                FirstName = request.FirstName,
+                LastName = request.LastName,
+                FcmToken = request.FcmToken,
+                CurrentLatitude = 0.0,  // Default location
+                CurrentLongitude = 0.0, // Default location
+                IsActive = true,
+                IsAvailable = true,
+                Status = "Online",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+
+            _context.FieldEngineers.Add(fieldEngineer);
+            Console.WriteLine($"Creating new field engineer from external API: {fieldEngineer.Name} (ID: {fieldEngineer.Id})");
+        }
+        else
+        {
+            // User exists, update their info and FCM token
+            fieldEngineer.FirstName = request.FirstName ?? fieldEngineer.FirstName;
+            fieldEngineer.LastName = request.LastName ?? fieldEngineer.LastName;
+            fieldEngineer.Name = $"{fieldEngineer.FirstName} {fieldEngineer.LastName}";
+            fieldEngineer.FcmToken = request.FcmToken;
+            fieldEngineer.IsAvailable = true; // Make available upon login
+            fieldEngineer.Status = "Online";
+            fieldEngineer.UpdatedAt = DateTime.UtcNow;
+
+            _context.FieldEngineers.Update(fieldEngineer);
+            Console.WriteLine($"Updating existing field engineer: {fieldEngineer.Name} (ID: {fieldEngineer.Id})");
         }
 
-        // I-update ang FcmToken at status niya
-        fieldEngineer.FcmToken = request.FcmToken;
-        fieldEngineer.IsAvailable = true; // Gawing available upon login
-        fieldEngineer.Status = "Online";
-        fieldEngineer.UpdatedAt = DateTime.UtcNow;
-
-        _context.FieldEngineers.Update(fieldEngineer);
         await _context.SaveChangesAsync();
 
-        // Ibalik ang buong, updated na profile sa app
+        // Send SignalR notification
+        await _hubContext.Clients.All.SendAsync("ReceiveFieldEngineerUpdate", fieldEngineer);
+
+        // Return the complete, updated profile to the app
         return Ok(fieldEngineer);
     }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Login sync error: {ex.Message}");
+        return StatusCode(500, $"Login sync failed: {ex.Message}");
+    }
+}
 
         private bool FieldEngineerExists(int id)
         {
@@ -252,6 +286,8 @@ namespace EcsFeMappingApi.Controllers
     public class LoginSyncRequest
     {
         public int UserId { get; set; }
+        public string? FirstName { get; set; }  // Add these
+        public string? LastName { get; set; }   // Add these
         public string FcmToken { get; set; }
     }
     
