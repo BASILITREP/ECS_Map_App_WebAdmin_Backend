@@ -8,11 +8,17 @@ namespace EcsFeMappingApi.Models
         [Key]
         public int Id { get; set; }
         public string Name { get; set; } = string.Empty;
+        
+        
+        public string FirstName { get; set; } = string.Empty;
+        public string LastName { get; set; } = string.Empty;
+        
         public string Email { get; set; } = string.Empty;
         public string Phone { get; set; } = string.Empty;
         public double CurrentLatitude { get; set; }
         public double CurrentLongitude { get; set; }
         public bool IsAvailable { get; set; }
+        public bool IsActive { get; set; } = true;  // Add this too
         public string Status { get; set; } = string.Empty;
         public string? OneSignalPlayerId { get; set; }
         public DateTime CreatedAt { get; set; }
