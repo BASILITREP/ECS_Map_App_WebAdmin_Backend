@@ -199,6 +199,33 @@ namespace EcsFeMappingApi.Controllers
             }
         }
 
+        [HttpPost("loginsync")]
+    public async Task<ActionResult<FieldEngineer>> LoginSync([FromBody] LoginSyncRequest request)
+    {
+        // Hanapin ang Field Engineer gamit ang UserId mula sa external API
+        var fieldEngineer = await _context.FieldEngineers
+            .FirstOrDefaultAsync(fe => fe.Id == request.UserId);
+
+        if (fieldEngineer == null)
+        {
+            // Kung wala pa siya sa database mo, pwede kang gumawa ng bago
+            // (For now, mag-return muna tayo ng not found)
+            return NotFound($"Field engineer with ID {request.UserId} not found in this system.");
+        }
+
+        // I-update ang FcmToken at status niya
+        fieldEngineer.FcmToken = request.FcmToken;
+        fieldEngineer.IsAvailable = true; // Gawing available upon login
+        fieldEngineer.Status = "Online";
+        fieldEngineer.UpdatedAt = DateTime.UtcNow;
+
+        _context.FieldEngineers.Update(fieldEngineer);
+        await _context.SaveChangesAsync();
+
+        // Ibalik ang buong, updated na profile sa app
+        return Ok(fieldEngineer);
+    }
+
         private bool FieldEngineerExists(int id)
         {
             return _context.FieldEngineers.Any(e => e.Id == id);
@@ -220,6 +247,12 @@ namespace EcsFeMappingApi.Controllers
         public int Id { get; set; }
         public double CurrentLatitude { get; set; }
         public double CurrentLongitude { get; set; }
+    }
+
+    public class LoginSyncRequest
+    {
+        public int UserId { get; set; }
+        public string FcmToken { get; set; }
     }
     
 }
