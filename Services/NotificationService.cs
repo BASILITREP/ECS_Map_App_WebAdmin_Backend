@@ -114,6 +114,12 @@ namespace EcsFeMappingApi.Services
             await _hubContext.Clients.All.SendAsync("ReceiveServiceRequestUpdate", serviceRequest);
         }
 
+        public async Task BroadcastFieldEngineerUpdate(FieldEngineer fieldEngineer)
+            {
+                await _hubContext.Clients.All.SendAsync("fieldEngineerUpdate", fieldEngineer);
+                Console.WriteLine($"📡 Broadcasting field engineer update: {fieldEngineer.Name}");
+            }
+
         public async Task SendNewRoute(object newRoute)
         {
             Console.WriteLine($"Broadcasting new route: {JsonSerializer.Serialize(newRoute)}");
