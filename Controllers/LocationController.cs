@@ -43,24 +43,32 @@ namespace EcsFeMappingApi.Controllers
                 return BadRequest("No location points provided.");
             }
 
-            // Use the service to process the points
-            await _tripService.ProcessLocationPoints(points);
+            try 
+            {
+                // ADD THIS: Save location points to database first
+                _context.LocationPoints.AddRange(points);
+                await _context.SaveChangesAsync();
+                
+                Console.WriteLine($"✅ Saved {points.Count} location points to database");
 
-            return Ok();
+                // THEN process for trip detection
+                await _tripService.ProcessLocationPoints(points);
+                
+                Console.WriteLine($"✅ Processed {points.Count} points for trip detection");
+
+                return Ok(new { 
+                    message = "Location points saved and processed successfully", 
+                    count = points.Count 
+                });
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ Error saving location points: {ex.Message}");
+                Console.WriteLine($"❌ Stack trace: {ex.StackTrace}");
+                return StatusCode(500, $"Error processing location points: {ex.Message}");
+            }
         }
 
-        // Add a new endpoint to get trips
-        // [HttpGet("trips/{feId}")]
-        // public async Task<ActionResult<IEnumerable<TripModel>>> GetTrips(int feId)
-        // {
-        //     return await _context.Trips
-        //         .Include(t => t.Path)
-        //         .Where(t => t.FieldEngineerId == feId)
-        //         .OrderByDescending(t => t.StartTime)
-        //         .ToListAsync();
-        // }
-
-        // ADD THIS METHOD to your LocationController:
 
         [HttpGet("trips/{fieldEngineerId}")]
         public async Task<ActionResult<IEnumerable<TripModel>>> GetFieldEngineerTrips(int fieldEngineerId)

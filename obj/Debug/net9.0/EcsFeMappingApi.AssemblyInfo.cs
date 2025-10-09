@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("EcsFeMappingApi")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+1c269bdcca3cca41f5162c55a66dc0267d231ebc")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+b35466425de725ac1f3047c8a90d173374c38c88")]
 [assembly: System.Reflection.AssemblyProductAttribute("EcsFeMappingApi")]
 [assembly: System.Reflection.AssemblyTitleAttribute("EcsFeMappingApi")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
