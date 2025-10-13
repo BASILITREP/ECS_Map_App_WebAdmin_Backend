@@ -119,7 +119,7 @@ public class ActivityProcessingService : IHostedService, IDisposable
                 var drivePoints = points.Where(p => p.Timestamp > lastEventEndTime && p.Timestamp < stop.StartTime).ToList();
                 if (drivePoints.Count > 1)
                 {
-                    var driveEvent = CreateDriveEvent(drivePoints, engineerId);
+                    var driveEvent = await CreateDriveEvent(drivePoints, engineerId);
                     newEvents.Add(driveEvent);
                 }
                 lastEventEndTime = stop.EndTime;
@@ -165,13 +165,20 @@ public class ActivityProcessingService : IHostedService, IDisposable
         };
     }
 
-    private ActivityEvent CreateDriveEvent(List<LocationPoint> drivePoints, int engineerId)
+    private async Task<ActivityEvent> CreateDriveEvent(List<LocationPoint> drivePoints, int engineerId)
     {
         double totalDistanceKm = 0;
         for (int i = 0; i < drivePoints.Count - 1; i++)
         {
             totalDistanceKm += CalculateDistance(drivePoints[i], drivePoints[i+1]) / 1000.0;
         }
+
+        var startPoint = drivePoints.First();
+        var endPoint = drivePoints.Last();
+
+        // Geocode start and end addresses
+        var (_, startAddress) = await ReverseGeocodeAsync(startPoint.Latitude, startPoint.Longitude);
+        var (_, endAddress) = await ReverseGeocodeAsync(endPoint.Latitude, endPoint.Longitude);
 
         return new ActivityEvent
         {
@@ -182,6 +189,12 @@ public class ActivityProcessingService : IHostedService, IDisposable
             DurationMinutes = (int)(drivePoints.Last().Timestamp - drivePoints.First().Timestamp).TotalMinutes,
             DistanceKm = totalDistanceKm,
             TopSpeedKmh = drivePoints.Max(p => p.Speed ?? 0) * 3.6, // Convert m/s to km/h
+            StartLatitude = startPoint.Latitude,
+            StartLongitude = startPoint.Longitude,
+            StartAddress = startAddress,
+            EndLatitude = endPoint.Latitude,
+            EndLongitude = endPoint.Longitude,
+            EndAddress = endAddress,
         };
     }
 

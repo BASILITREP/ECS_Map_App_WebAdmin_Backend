@@ -17,6 +17,12 @@ namespace EcsFeMappingApi.Models
         //Drive Specific fields
         public double? DistanceKm { get; set; }
         public double? TopSpeedKmh { get; set; }
+        public double? StartLatitude { get; set; }
+        public double? StartLongitude { get; set; }
+        public double? EndLatitude { get; set; }
+        public double? EndLongitude { get; set; }
+        public string? StartAddress { get; set; }
+        public string? EndAddress { get; set; }
 
         //Stop Specific fields
         public string? LocationName { get; set; }
