@@ -24,22 +24,7 @@ namespace EcsFeMappingApi.Controllers
             _hubContext = hubContext;
         }
 
-        [HttpGet("{id}/activity")]
-        public async Task<ActionResult<IEnumerable<ActivityEvent>>> GetFieldEngineerActivity(int id)
-        {
-            var activities = await _context.ActivityEvents
-                .Where(e => e.FieldEngineerId == id)
-                .OrderByDescending(e => e.StartTime)
-                .Take(50) // Optionally limit to the last 50 events for performance
-                .ToListAsync();
-
-            if (activities == null)
-            {
-                return NotFound();
-            }
-
-            return Ok(activities);
-        }
+        
 
         // GET: api/FieldEngineers
         [HttpGet]
@@ -211,10 +196,13 @@ namespace EcsFeMappingApi.Controllers
             var activities = await _context.ActivityEvents
                 .Where(a => a.FieldEngineerId == fieldEngineerId)
                 .OrderByDescending(a => a.StartTime)
+                .Take(100) // Limit to the last 100 activities for good performance
                 .ToListAsync();
 
             return Ok(activities);
         }
+
+        
 
         [HttpPost("loginsync")]
 public async Task<ActionResult<FieldEngineer>> LoginSync([FromBody] LoginSyncRequest request)
