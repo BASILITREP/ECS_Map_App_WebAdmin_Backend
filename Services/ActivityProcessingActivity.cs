@@ -73,11 +73,6 @@ namespace EcsFeMappingApi.Services
                 {
                     _logger.LogInformation($"Processing activities for Engineer ID: {engineerId}");
 
-                    var lastEvent = await dbContext.ActivityEvents
-                        .Where(e => e.FieldEngineerId == engineerId)
-                        .OrderByDescending(e => e.EndTime)
-                        .FirstOrDefaultAsync();
-                    
                     var pointsToProcess = await dbContext.LocationPoints
                         .Where(p => p.FieldEngineerId == engineerId && !p.IsProcessed)
                         .OrderBy(p => p.Timestamp)
@@ -85,83 +80,83 @@ namespace EcsFeMappingApi.Services
 
                     if (!pointsToProcess.Any()) continue;
 
-                    var newEvents = new List<ActivityEvent>();
-                    var potentialStopPoints = new List<LocationPoint>();
-
-                    foreach (var point in pointsToProcess)
-                    {
-                        if ((point.Speed ?? 0) < STOP_SPEED_THRESHOLD_MS)
-                        {
-                            potentialStopPoints.Add(point);
-                        }
-                        else
-                        {
-                            if (potentialStopPoints.Any())
-                            {
-                                var stopDuration = (potentialStopPoints.Last().Timestamp - potentialStopPoints.First().Timestamp).TotalMinutes;
-                                if (stopDuration >= MIN_STOP_DURATION_MINUTES)
-                                {
-                                    var stopEvent = await CreateStopEvent(potentialStopPoints, engineerId, dbContext);
-                                    newEvents.Add(stopEvent);
-                                }
-                                potentialStopPoints.Clear();
-                            }
-                        }
-                    }
-
-                    if (potentialStopPoints.Any())
-                    {
-                        var stopDuration = (potentialStopPoints.Last().Timestamp - potentialStopPoints.First().Timestamp).TotalMinutes;
-                        if (stopDuration >= MIN_STOP_DURATION_MINUTES)
-                        {
-                            var stopEvent = await CreateStopEvent(potentialStopPoints, engineerId, dbContext);
-                            newEvents.Add(stopEvent);
-                        }
-                    }
-
-                    var allEvents = (lastEvent != null ? new List<ActivityEvent> { lastEvent } : new List<ActivityEvent>())
-                        .Concat(newEvents)
-                        .OrderBy(e => e.StartTime)
-                        .ToList();
-
-                    for (int i = 0; i < allEvents.Count; i++)
-                    {
-                        var currentEvent = allEvents[i];
-                        DateTime driveStartTime = currentEvent.EndTime;
-                        DateTime driveEndTime = (i + 1 < allEvents.Count) ? allEvents[i + 1].StartTime : DateTime.MaxValue;
-
-                        var drivePoints = pointsToProcess
-                            .Where(p => p.Timestamp > driveStartTime && p.Timestamp < driveEndTime)
-                            .ToList();
-
-                        if (drivePoints.Count >= MIN_DRIVE_POINTS)
-                        {
-                            // CORRECTED: Pass dbContext to CreateDriveEvent
-                            var driveEvent = await CreateDriveEvent(drivePoints, engineerId, dbContext);
-                            newEvents.Add(driveEvent);
-                        }
-                    }
+                    var newEvents = await DetectEvents(pointsToProcess, engineerId, dbContext);
 
                     if (newEvents.Any())
                     {
                         await dbContext.ActivityEvents.AddRangeAsync(newEvents);
+                        _logger.LogInformation($"Adding {newEvents.Count} new events for Engineer ID: {engineerId}.");
                     }
 
                     pointsToProcess.ForEach(p => p.IsProcessed = true);
                     await dbContext.SaveChangesAsync();
-                    _logger.LogInformation($"Finished processing for Engineer ID: {engineerId}. Found {newEvents.Count} new activities.");
+                    _logger.LogInformation($"Finished processing for Engineer ID: {engineerId}. Marked {pointsToProcess.Count} points as processed.");
                 }
             }
         }
 
-        private async Task<ActivityEvent> CreateStopEvent(List<LocationPoint> stopPoints, int engineerId, AppDbContext dbContext)
+        private async Task<List<ActivityEvent>> DetectEvents(List<LocationPoint> points, int engineerId, AppDbContext dbContext)
         {
+            var events = new List<ActivityEvent>();
+            if (points.Count == 0) return events;
+
+            var currentSegment = new List<LocationPoint>();
+            bool isCurrentlyStopped = (points.First().Speed ?? 0) < STOP_SPEED_THRESHOLD_MS;
+
+            foreach (var point in points)
+            {
+                bool isStopped = (point.Speed ?? 0) < STOP_SPEED_THRESHOLD_MS;
+
+                if (isStopped == isCurrentlyStopped)
+                {
+                    currentSegment.Add(point);
+                }
+                else
+                {
+                    // The type of movement has changed, so process the completed segment
+                    if (currentSegment.Any())
+                    {
+                        var newEvent = isCurrentlyStopped
+                            ? await CreateStopEvent(currentSegment, engineerId, dbContext)
+                            : await CreateDriveEvent(currentSegment, engineerId, dbContext);
+                        
+                        if (newEvent != null) events.Add(newEvent);
+                    }
+
+                    // Start a new segment
+                    currentSegment = new List<LocationPoint> { point };
+                    isCurrentlyStopped = isStopped;
+                }
+            }
+
+            // Process the last remaining segment
+            if (currentSegment.Any())
+            {
+                var lastEvent = isCurrentlyStopped
+                    ? await CreateStopEvent(currentSegment, engineerId, dbContext)
+                    : await CreateDriveEvent(currentSegment, engineerId, dbContext);
+
+                if (lastEvent != null) events.Add(lastEvent);
+            }
+
+            return events;
+        }
+
+
+        private async Task<ActivityEvent?> CreateStopEvent(List<LocationPoint> stopPoints, int engineerId, AppDbContext dbContext)
+        {
+            if (!stopPoints.Any()) return null;
+
             var firstPoint = stopPoints.First();
             var lastPoint = stopPoints.Last();
+            var duration = (lastPoint.Timestamp - firstPoint.Timestamp).TotalMinutes;
+
+            if (duration < MIN_STOP_DURATION_MINUTES) return null;
+
             var averageLat = stopPoints.Average(p => p.Latitude);
             var averageLon = stopPoints.Average(p => p.Longitude);
 
-            var (_, address) = await ReverseGeocodeAsync(averageLat, averageLon, dbContext);
+            var (locationName, address) = await ReverseGeocodeAsync(averageLat, averageLon, dbContext);
 
             return new ActivityEvent
             {
@@ -169,16 +164,18 @@ namespace EcsFeMappingApi.Services
                 Type = EventType.Stop,
                 StartTime = firstPoint.Timestamp,
                 EndTime = lastPoint.Timestamp,
-                DurationMinutes = (int)(lastPoint.Timestamp - firstPoint.Timestamp).TotalMinutes,
+                DurationMinutes = (int)duration,
                 Address = address,
+                LocationName = locationName,
                 Latitude = averageLat,
                 Longitude = averageLon
             };
         }
 
-        // CORRECTED: Added dbContext parameter
-        private async Task<ActivityEvent> CreateDriveEvent(List<LocationPoint> drivePoints, int engineerId, AppDbContext dbContext)
+        private async Task<ActivityEvent?> CreateDriveEvent(List<LocationPoint> drivePoints, int engineerId, AppDbContext dbContext)
         {
+            if (drivePoints.Count < MIN_DRIVE_POINTS) return null;
+
             var firstPoint = drivePoints.First();
             var lastPoint = drivePoints.Last();
             double totalDistance = 0;
@@ -198,7 +195,7 @@ namespace EcsFeMappingApi.Services
                 EndTime = lastPoint.Timestamp,
                 DurationMinutes = (int)(lastPoint.Timestamp - firstPoint.Timestamp).TotalMinutes,
                 DistanceKm = totalDistance,
-                TopSpeedKmh = drivePoints.Max(p => p.Speed ?? 0) * 3.6, // Convert m/s to km/h
+                TopSpeedKmh = drivePoints.Max(p => p.Speed ?? 0) * 3.6,
                 StartLatitude = firstPoint.Latitude,
                 StartLongitude = firstPoint.Longitude,
                 EndLatitude = lastPoint.Latitude,
@@ -208,8 +205,7 @@ namespace EcsFeMappingApi.Services
             };
         }
 
-        // CORRECTED: Added dbContext parameter and use _httpClientFactory
-        private async Task<(string, string)> ReverseGeocodeAsync(double lat, double lon, AppDbContext dbContext)
+        private async Task<(string LocationName, string Address)> ReverseGeocodeAsync(double lat, double lon, AppDbContext dbContext)
         {
             var httpClient = _httpClientFactory.CreateClient();
             var apiKey = "pk.eyJ1IjoiYmFzaWwxLTIzIiwiYSI6ImNsa3ZudnZqZDBpZ2szZHFxZ3NqYjB6d2cifQ.Xb3Jp3a_UKWv3yN4nJ5A7A";
@@ -226,12 +222,24 @@ namespace EcsFeMappingApi.Services
                         var features = jsonDoc.RootElement.GetProperty("features");
                         if (features.GetArrayLength() > 0)
                         {
-                            var placeName = features[0].GetProperty("place_name").GetString() ?? "Unknown Address";
-                            var context = features[0].GetProperty("context");
-                            var locality = context.EnumerateArray().FirstOrDefault(c => c.GetProperty("id").GetString().StartsWith("locality")).GetProperty("text").GetString() ?? "Unknown City";
-                            return (locality, placeName);
+                            var feature = features[0];
+                            var placeName = feature.TryGetProperty("place_name", out var placeNameProp) ? placeNameProp.GetString() ?? "Unknown Address" : "Unknown Address";
+                            
+                            string locationName = "Unknown";
+                            if (feature.TryGetProperty("context", out var contextProp))
+                            {
+                                locationName = contextProp.EnumerateArray()
+                                    .FirstOrDefault(c => c.TryGetProperty("id", out var idProp) && (idProp.GetString()?.StartsWith("locality") ?? false))
+                                    .GetProperty("text").GetString() ?? "Unknown";
+                            }
+                            
+                            return (locationName, placeName);
                         }
                     }
+                }
+                else
+                {
+                    _logger.LogWarning($"Reverse geocoding failed with status code {response.StatusCode} for {lat},{lon}");
                 }
             }
             catch (Exception ex)
