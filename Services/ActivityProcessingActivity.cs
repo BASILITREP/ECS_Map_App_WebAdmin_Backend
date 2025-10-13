@@ -209,7 +209,7 @@ namespace EcsFeMappingApi.Services
         }
 
         // CORRECTED: Added dbContext parameter and use _httpClientFactory
-        private async Task<(string, string)> ReverseGeocodeAsync(double lat, double lon, AppDbContext dbContext)
+       private async Task<(string, string)> ReverseGeocodeAsync(double lat, double lon, AppDbContext dbContext)
         {
             var httpClient = _httpClientFactory.CreateClient();
             var apiKey = "pk.eyJ1IjoiYmFzaWwxLTIzIiwiYSI6ImNsa3ZudnZqZDBpZ2szZHFxZ3NqYjB6d2cifQ.Xb3Jp3a_UKWv3yN4nJ5A7A";
@@ -217,30 +217,43 @@ namespace EcsFeMappingApi.Services
 
             try
             {
+                _logger.LogInformation($"[GEOCODE] Attempting to geocode coordinates: {lat}, {lon} at URL: {url}");
+                
                 var response = await httpClient.GetAsync(url);
-                if (response.IsSuccessStatusCode)
+
+                if (!response.IsSuccessStatusCode)
                 {
-                    var jsonString = await response.Content.ReadAsStringAsync();
-                    using (var jsonDoc = JsonDocument.Parse(jsonString))
+                    var errorBody = await response.Content.ReadAsStringAsync();
+                    _logger.LogError($"[GEOCODE_FAIL] Mapbox API request failed with status code: {response.StatusCode}. Body: {errorBody}");
+                    return ("Unknown", "Address lookup failed");
+                }
+
+                var jsonString = await response.Content.ReadAsStringAsync();
+                using (var jsonDoc = JsonDocument.Parse(jsonString))
+                {
+                    var features = jsonDoc.RootElement.GetProperty("features");
+                    if (features.GetArrayLength() > 0)
                     {
-                        var features = jsonDoc.RootElement.GetProperty("features");
-                        if (features.GetArrayLength() > 0)
-                        {
-                            var placeName = features[0].GetProperty("place_name").GetString() ?? "Unknown Address";
-                            var context = features[0].GetProperty("context");
-                            var locality = context.EnumerateArray().FirstOrDefault(c => c.GetProperty("id").GetString().StartsWith("locality")).GetProperty("text").GetString() ?? "Unknown City";
-                            return (locality, placeName);
-                        }
+                        var placeName = features[0].GetProperty("place_name").GetString() ?? "Unknown Address";
+                        var context = features[0].GetProperty("context");
+                        var locality = context.EnumerateArray().FirstOrDefault(c => c.GetProperty("id").GetString().StartsWith("locality")).GetProperty("text").GetString() ?? "Unknown City";
+                        
+                        _logger.LogInformation($"[GEOCODE_SUCCESS] Geocoding successful: {placeName}");
+                        return (locality, placeName);
                     }
                 }
+                _logger.LogWarning("[GEOCODE_WARN] Geocoding successful but no features found.");
+                return ("Unknown", "No address found for coordinates");
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error during reverse geocoding.");
+                // This will now log the exact error message to Railway
+                _logger.LogError(ex, "[GEOCODE_CRITICAL] An unhandled exception occurred during the reverse geocoding HTTP request.");
             }
-            return ("Unknown", "Unknown Address");
+            
+            // Return a default value if any error occurs
+            return ("Unknown", "Address lookup failed due to an exception");
         }
-
         private double HaversineDistance(LocationPoint p1, LocationPoint p2)
         {
             var R = 6371; // Radius of Earth in kilometers
