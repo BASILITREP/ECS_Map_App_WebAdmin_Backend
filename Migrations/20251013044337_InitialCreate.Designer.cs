@@ -12,8 +12,8 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace EcsFeMappingApi.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20250925065001_InitialProductionCreate")]
-    partial class InitialProductionCreate
+    [Migration("20251013044337_InitialCreate")]
+    partial class InitialCreate
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -42,6 +42,15 @@ namespace EcsFeMappingApi.Migrations
                     b.Property<int>("DurationMinutes")
                         .HasColumnType("int");
 
+                    b.Property<string>("EndAddress")
+                        .HasColumnType("longtext");
+
+                    b.Property<double?>("EndLatitude")
+                        .HasColumnType("double");
+
+                    b.Property<double?>("EndLongitude")
+                        .HasColumnType("double");
+
                     b.Property<DateTime>("EndTime")
                         .HasColumnType("datetime(6)");
 
@@ -55,6 +64,15 @@ namespace EcsFeMappingApi.Migrations
                         .HasColumnType("longtext");
 
                     b.Property<double?>("Longitude")
+                        .HasColumnType("double");
+
+                    b.Property<string>("StartAddress")
+                        .HasColumnType("longtext");
+
+                    b.Property<double?>("StartLatitude")
+                        .HasColumnType("double");
+
+                    b.Property<double?>("StartLongitude")
                         .HasColumnType("double");
 
                     b.Property<DateTime>("StartTime")
@@ -136,8 +154,19 @@ namespace EcsFeMappingApi.Migrations
                     b.Property<string>("FcmToken")
                         .HasColumnType("longtext");
 
+                    b.Property<string>("FirstName")
+                        .IsRequired()
+                        .HasColumnType("longtext");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("tinyint(1)");
+
                     b.Property<bool>("IsAvailable")
                         .HasColumnType("tinyint(1)");
+
+                    b.Property<string>("LastName")
+                        .IsRequired()
+                        .HasColumnType("longtext");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -169,6 +198,12 @@ namespace EcsFeMappingApi.Migrations
                         .HasColumnType("int");
 
                     MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<double?>("Accuracy")
+                        .HasColumnType("double");
+
+                    b.Property<string>("Address")
+                        .HasColumnType("longtext");
 
                     b.Property<int>("FieldEngineerId")
                         .HasColumnType("int");
@@ -262,9 +297,9 @@ namespace EcsFeMappingApi.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime(6)");
 
-                    b.Property<byte[]>("PasswordHash")
+                    b.Property<string>("PasswordHash")
                         .IsRequired()
-                        .HasColumnType("longblob");
+                        .HasColumnType("longtext");
 
                     b.Property<string>("Role")
                         .IsRequired()
@@ -272,8 +307,7 @@ namespace EcsFeMappingApi.Migrations
 
                     b.Property<string>("Username")
                         .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("varchar(50)");
+                        .HasColumnType("longtext");
 
                     b.HasKey("Id");
 
@@ -283,8 +317,8 @@ namespace EcsFeMappingApi.Migrations
                         new
                         {
                             Id = 1,
-                            CreatedAt = new DateTime(2025, 9, 25, 6, 49, 59, 378, DateTimeKind.Utc).AddTicks(5673),
-                            PasswordHash = new byte[] { 36, 50, 97, 36, 49, 49, 36, 82, 82, 97, 101, 100, 99, 106, 122, 114, 110, 56, 104, 47, 83, 49, 78, 109, 109, 122, 116, 99, 117, 74, 109, 65, 76, 88, 97, 78, 116, 76, 49, 114, 102, 82, 87, 103, 54, 120, 117, 115, 112, 103, 100, 102, 49, 49, 47, 106, 79, 108, 119, 117 },
+                            CreatedAt = new DateTime(2025, 10, 13, 4, 43, 35, 293, DateTimeKind.Utc).AddTicks(4078),
+                            PasswordHash = "$2a$11$YzptMy17vOrnjnEFpyCrS.ESsVhNpZRJxgTGzrxLNQqDO2RQLyE7.",
                             Role = "Admin",
                             Username = "admin"
                         });

@@ -39,6 +39,15 @@ namespace EcsFeMappingApi.Migrations
                     b.Property<int>("DurationMinutes")
                         .HasColumnType("int");
 
+                    b.Property<string>("EndAddress")
+                        .HasColumnType("longtext");
+
+                    b.Property<double?>("EndLatitude")
+                        .HasColumnType("double");
+
+                    b.Property<double?>("EndLongitude")
+                        .HasColumnType("double");
+
                     b.Property<DateTime>("EndTime")
                         .HasColumnType("datetime(6)");
 
@@ -52,6 +61,15 @@ namespace EcsFeMappingApi.Migrations
                         .HasColumnType("longtext");
 
                     b.Property<double?>("Longitude")
+                        .HasColumnType("double");
+
+                    b.Property<string>("StartAddress")
+                        .HasColumnType("longtext");
+
+                    b.Property<double?>("StartLatitude")
+                        .HasColumnType("double");
+
+                    b.Property<double?>("StartLongitude")
                         .HasColumnType("double");
 
                     b.Property<DateTime>("StartTime")
@@ -199,12 +217,7 @@ namespace EcsFeMappingApi.Migrations
                     b.Property<DateTime>("Timestamp")
                         .HasColumnType("datetime(6)");
 
-                    b.Property<int?>("TripModelId")
-                        .HasColumnType("int");
-
                     b.HasKey("Id");
-
-                    b.HasIndex("TripModelId");
 
                     b.ToTable("LocationPoints");
                 });
@@ -270,68 +283,6 @@ namespace EcsFeMappingApi.Migrations
                     b.ToTable("ServiceRequests");
                 });
 
-            modelBuilder.Entity("EcsFeMappingApi.Models.TripModel", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<double>("Distance")
-                        .HasColumnType("double");
-
-                    b.Property<string>("EndAddress")
-                        .IsRequired()
-                        .HasColumnType("longtext");
-
-                    b.Property<double>("EndLatitude")
-                        .HasColumnType("double");
-
-                    b.Property<string>("EndLocation")
-                        .IsRequired()
-                        .HasColumnType("longtext");
-
-                    b.Property<double>("EndLongitude")
-                        .HasColumnType("double");
-
-                    b.Property<DateTime?>("EndTime")
-                        .HasColumnType("datetime(6)");
-
-                    b.Property<int>("FieldEngineerId")
-                        .HasColumnType("int");
-
-                    b.Property<string>("StartAddress")
-                        .IsRequired()
-                        .HasColumnType("longtext");
-
-                    b.Property<double>("StartLatitude")
-                        .HasColumnType("double");
-
-                    b.Property<string>("StartLocation")
-                        .IsRequired()
-                        .HasColumnType("longtext");
-
-                    b.Property<double>("StartLongitude")
-                        .HasColumnType("double");
-
-                    b.Property<DateTime>("StartTime")
-                        .HasColumnType("datetime(6)");
-
-                    b.Property<double>("TotalDistance")
-                        .HasColumnType("double");
-
-                    b.Property<string>("TripType")
-                        .IsRequired()
-                        .HasColumnType("longtext");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("FieldEngineerId");
-
-                    b.ToTable("Trips");
-                });
-
             modelBuilder.Entity("EcsFeMappingApi.Models.UserModel", b =>
                 {
                     b.Property<int>("Id")
@@ -363,19 +314,11 @@ namespace EcsFeMappingApi.Migrations
                         new
                         {
                             Id = 1,
-                            CreatedAt = new DateTime(2025, 10, 8, 6, 15, 42, 459, DateTimeKind.Utc).AddTicks(4658),
-                            PasswordHash = "$2a$11$u9BX463tOA2ySNK4Ot2NE.AiYZlGVGDzD1Q8gGawKYg.dMFlJpmxC",
+                            CreatedAt = new DateTime(2025, 10, 13, 4, 43, 35, 293, DateTimeKind.Utc).AddTicks(4078),
+                            PasswordHash = "$2a$11$YzptMy17vOrnjnEFpyCrS.ESsVhNpZRJxgTGzrxLNQqDO2RQLyE7.",
                             Role = "Admin",
                             Username = "admin"
                         });
-                });
-
-            modelBuilder.Entity("EcsFeMappingApi.Models.LocationPoint", b =>
-                {
-                    b.HasOne("EcsFeMappingApi.Models.TripModel", null)
-                        .WithMany("Path")
-                        .HasForeignKey("TripModelId")
-                        .OnDelete(DeleteBehavior.Cascade);
                 });
 
             modelBuilder.Entity("EcsFeMappingApi.Models.ServiceRequest", b =>
@@ -394,22 +337,6 @@ namespace EcsFeMappingApi.Migrations
                     b.Navigation("Branch");
 
                     b.Navigation("FieldEngineer");
-                });
-
-            modelBuilder.Entity("EcsFeMappingApi.Models.TripModel", b =>
-                {
-                    b.HasOne("EcsFeMappingApi.Models.FieldEngineer", "FieldEngineer")
-                        .WithMany()
-                        .HasForeignKey("FieldEngineerId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("FieldEngineer");
-                });
-
-            modelBuilder.Entity("EcsFeMappingApi.Models.TripModel", b =>
-                {
-                    b.Navigation("Path");
                 });
 #pragma warning restore 612, 618
         }

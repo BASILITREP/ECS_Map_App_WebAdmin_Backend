@@ -7,7 +7,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace EcsFeMappingApi.Migrations
 {
     /// <inheritdoc />
-    public partial class InitialProductionCreate : Migration
+    public partial class InitialCreate : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
@@ -28,6 +28,14 @@ namespace EcsFeMappingApi.Migrations
                     DurationMinutes = table.Column<int>(type: "int", nullable: false),
                     DistanceKm = table.Column<double>(type: "double", nullable: true),
                     TopSpeedKmh = table.Column<double>(type: "double", nullable: true),
+                    StartLatitude = table.Column<double>(type: "double", nullable: true),
+                    StartLongitude = table.Column<double>(type: "double", nullable: true),
+                    EndLatitude = table.Column<double>(type: "double", nullable: true),
+                    EndLongitude = table.Column<double>(type: "double", nullable: true),
+                    StartAddress = table.Column<string>(type: "longtext", nullable: true)
+                        .Annotation("MySql:CharSet", "utf8mb4"),
+                    EndAddress = table.Column<string>(type: "longtext", nullable: true)
+                        .Annotation("MySql:CharSet", "utf8mb4"),
                     LocationName = table.Column<string>(type: "longtext", nullable: true)
                         .Annotation("MySql:CharSet", "utf8mb4"),
                     Address = table.Column<string>(type: "longtext", nullable: true)
@@ -74,6 +82,10 @@ namespace EcsFeMappingApi.Migrations
                         .Annotation("MySql:ValueGenerationStrategy", MySqlValueGenerationStrategy.IdentityColumn),
                     Name = table.Column<string>(type: "longtext", nullable: false)
                         .Annotation("MySql:CharSet", "utf8mb4"),
+                    FirstName = table.Column<string>(type: "longtext", nullable: false)
+                        .Annotation("MySql:CharSet", "utf8mb4"),
+                    LastName = table.Column<string>(type: "longtext", nullable: false)
+                        .Annotation("MySql:CharSet", "utf8mb4"),
                     Email = table.Column<string>(type: "longtext", nullable: false)
                         .Annotation("MySql:CharSet", "utf8mb4"),
                     Phone = table.Column<string>(type: "longtext", nullable: false)
@@ -81,6 +93,7 @@ namespace EcsFeMappingApi.Migrations
                     CurrentLatitude = table.Column<double>(type: "double", nullable: false),
                     CurrentLongitude = table.Column<double>(type: "double", nullable: false),
                     IsAvailable = table.Column<bool>(type: "tinyint(1)", nullable: false),
+                    IsActive = table.Column<bool>(type: "tinyint(1)", nullable: false),
                     Status = table.Column<string>(type: "longtext", nullable: false)
                         .Annotation("MySql:CharSet", "utf8mb4"),
                     OneSignalPlayerId = table.Column<string>(type: "longtext", nullable: true)
@@ -106,7 +119,10 @@ namespace EcsFeMappingApi.Migrations
                     Latitude = table.Column<double>(type: "double", nullable: false),
                     Longitude = table.Column<double>(type: "double", nullable: false),
                     Speed = table.Column<double>(type: "double", nullable: true),
-                    Timestamp = table.Column<DateTime>(type: "datetime(6)", nullable: false)
+                    Timestamp = table.Column<DateTime>(type: "datetime(6)", nullable: false),
+                    Address = table.Column<string>(type: "longtext", nullable: true)
+                        .Annotation("MySql:CharSet", "utf8mb4"),
+                    Accuracy = table.Column<double>(type: "double", nullable: true)
                 },
                 constraints: table =>
                 {
@@ -120,9 +136,10 @@ namespace EcsFeMappingApi.Migrations
                 {
                     Id = table.Column<int>(type: "int", nullable: false)
                         .Annotation("MySql:ValueGenerationStrategy", MySqlValueGenerationStrategy.IdentityColumn),
-                    Username = table.Column<string>(type: "varchar(50)", maxLength: 50, nullable: false)
+                    Username = table.Column<string>(type: "longtext", nullable: false)
                         .Annotation("MySql:CharSet", "utf8mb4"),
-                    PasswordHash = table.Column<byte[]>(type: "longblob", nullable: false),
+                    PasswordHash = table.Column<string>(type: "longtext", nullable: false)
+                        .Annotation("MySql:CharSet", "utf8mb4"),
                     Role = table.Column<string>(type: "longtext", nullable: false)
                         .Annotation("MySql:CharSet", "utf8mb4"),
                     CreatedAt = table.Column<DateTime>(type: "datetime(6)", nullable: false)
@@ -179,7 +196,7 @@ namespace EcsFeMappingApi.Migrations
             migrationBuilder.InsertData(
                 table: "Users",
                 columns: new[] { "Id", "CreatedAt", "PasswordHash", "Role", "Username" },
-                values: new object[] { 1, new DateTime(2025, 9, 25, 6, 49, 59, 378, DateTimeKind.Utc).AddTicks(5673), new byte[] { 36, 50, 97, 36, 49, 49, 36, 82, 82, 97, 101, 100, 99, 106, 122, 114, 110, 56, 104, 47, 83, 49, 78, 109, 109, 122, 116, 99, 117, 74, 109, 65, 76, 88, 97, 78, 116, 76, 49, 114, 102, 82, 87, 103, 54, 120, 117, 115, 112, 103, 100, 102, 49, 49, 47, 106, 79, 108, 119, 117 }, "Admin", "admin" });
+                values: new object[] { 1, new DateTime(2025, 10, 13, 4, 43, 35, 293, DateTimeKind.Utc).AddTicks(4078), "$2a$11$YzptMy17vOrnjnEFpyCrS.ESsVhNpZRJxgTGzrxLNQqDO2RQLyE7.", "Admin", "admin" });
 
             migrationBuilder.CreateIndex(
                 name: "IX_ServiceRequests_BranchId",
