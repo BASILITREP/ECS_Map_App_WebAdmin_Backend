@@ -10,256 +10,259 @@ using System;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Collections.Generic;
 
-public class ActivityProcessingService : IHostedService, IDisposable
+namespace EcsFeMappingApi.Services
 {
-    private readonly ILogger<ActivityProcessingService> _logger;
-    private readonly IServiceScopeFactory _scopeFactory;
-    private Timer? _timer;
-    private readonly HttpClient _httpClient;
-
-    // --- Configuration Constants (You can fine-tune these) ---
-    private const double STOP_CLUSTER_RADIUS_METERS = 50; // Points within 50m are part of a potential stop
-    private const int MIN_STOP_DURATION_MINUTES = 1;      // Must stay for at least 1 minute to be a "stop"
-    private const string MAPBOX_API_KEY = "pk.eyJ1IjoiYmFzaWwxLTIzIiwiYSI6ImNtZWFvNW43ZTA0ejQycHBtd3dkMHJ1bnkifQ.Y-IlM-vQAlaGr7pVQnug3Q"; // Your Mapbox key
-
-     public ActivityProcessingService(ILogger<ActivityProcessingService> logger, IServiceScopeFactory scopeFactory, IHttpClientFactory httpClientFactory)
+    public class ActivityProcessingService : IHostedService, IDisposable
     {
-        _logger = logger;
-        _scopeFactory = scopeFactory;
-        _httpClient = httpClientFactory.CreateClient(); // NEW: Create the client
-    }
+        // Constants for activity detection logic
+        private const double STOP_SPEED_THRESHOLD_MS = 1.4; // Speed less than 5 km/h
+        private const double MIN_STOP_DURATION_MINUTES = 5;
+        private const int MIN_DRIVE_POINTS = 2;
 
-    public Task StartAsync(CancellationToken cancellationToken)
-    {
-        _logger.LogInformation("Activity Processing Service is starting.");
-        // Run the processor every 15 minutes
-        _timer = new Timer(DoWork, null, TimeSpan.Zero, TimeSpan.FromMinutes(15));
-        return Task.CompletedTask;
-    }
+        private readonly ILogger<ActivityProcessingService> _logger;
+        private readonly IServiceProvider _serviceProvider;
+        private readonly IHttpClientFactory _httpClientFactory; // Use factory for HttpClient
+        private Timer? _timer;
 
-    private void DoWork(object? state)
-    {
-        _logger.LogInformation("Activity Processing Service is running.");
-        Task.Run(async () => await ProcessActivities());
-    }
-
-    private async Task ProcessActivities()
-{
-    using (var scope = _scopeFactory.CreateScope())
-    {
-        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        _logger.LogInformation("Processing raw location points...");
-
-        var engineerIds = await context.LocationPoints
-            .Select(p => p.FieldEngineerId)
-            .Distinct()
-            .ToListAsync();
-
-        foreach (var engineerId in engineerIds)
+        // CORRECTED CONSTRUCTOR
+        public ActivityProcessingService(
+            ILogger<ActivityProcessingService> logger,
+            IServiceProvider serviceProvider,
+            IHttpClientFactory httpClientFactory)
         {
-            _logger.LogInformation($"Checking points for engineer {engineerId}");
+            _logger = logger;
+            _serviceProvider = serviceProvider;
+            _httpClientFactory = httpClientFactory;
+        }
 
-            var points = await context.LocationPoints
-                .Where(p => p.FieldEngineerId == engineerId)
-                .OrderBy(p => p.Timestamp) // This is critical
-                .ToListAsync();
+        public Task StartAsync(CancellationToken cancellationToken)
+        {
+            _logger.LogInformation("Activity Processing Service is starting.");
+            _timer = new Timer(DoWork, null, TimeSpan.Zero, TimeSpan.FromMinutes(15));
+            return Task.CompletedTask;
+        }
 
-            if (points.Count < 2) continue;
-            
-            _logger.LogInformation($"Found {points.Count} points to process for engineer {engineerId}.");
+        private void DoWork(object? state)
+        {
+            _logger.LogInformation("Activity Processing Service is running via timer.");
+            Task.Run(async () => await ProcessActivities());
+        }
 
-            var newEvents = new List<ActivityEvent>();
-            var allStops = new List<ActivityEvent>();
+        public async Task TriggerProcessingAsync()
+        {
+            _logger.LogInformation("Activity Processing Service is being triggered manually.");
+            await ProcessActivities();
+        }
 
-            // --- NEW, SIMPLER ALGORITHM ---
-
-            // PASS 1: Find all the "Stops" first.
-            var currentCluster = new List<LocationPoint> { points.First() };
-            for (int i = 1; i < points.Count; i++)
+        private async Task ProcessActivities()
+        {
+            using (var scope = _serviceProvider.CreateScope())
             {
-                var currentPoint = points[i];
-                var lastPointInCluster = currentCluster.Last();
-                var distance = CalculateDistance(lastPointInCluster, currentPoint);
+                var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                _logger.LogInformation("Starting activity processing...");
 
-                if (distance <= STOP_CLUSTER_RADIUS_METERS)
+                var engineersWithNewPoints = await dbContext.LocationPoints
+                    .Where(p => !p.IsProcessed)
+                    .Select(p => p.FieldEngineerId)
+                    .Distinct()
+                    .ToListAsync();
+
+                foreach (var engineerId in engineersWithNewPoints)
                 {
-                    currentCluster.Add(currentPoint);
-                }
-                else
-                {
-                    // Cluster ended, check if it was a valid stop
-                    var clusterDuration = currentCluster.Last().Timestamp - currentCluster.First().Timestamp;
-                    if (clusterDuration.TotalMinutes >= MIN_STOP_DURATION_MINUTES)
+                    _logger.LogInformation($"Processing activities for Engineer ID: {engineerId}");
+
+                    var lastEvent = await dbContext.ActivityEvents
+                        .Where(e => e.FieldEngineerId == engineerId)
+                        .OrderByDescending(e => e.EndTime)
+                        .FirstOrDefaultAsync();
+                    
+                    var pointsToProcess = await dbContext.LocationPoints
+                        .Where(p => p.FieldEngineerId == engineerId && !p.IsProcessed)
+                        .OrderBy(p => p.Timestamp)
+                        .ToListAsync();
+
+                    if (!pointsToProcess.Any()) continue;
+
+                    var newEvents = new List<ActivityEvent>();
+                    var potentialStopPoints = new List<LocationPoint>();
+
+                    foreach (var point in pointsToProcess)
                     {
-                        var stopEvent = await CreateStopEvent(currentCluster, engineerId);
-                        allStops.Add(stopEvent);
+                        if ((point.Speed ?? 0) < STOP_SPEED_THRESHOLD_MS)
+                        {
+                            potentialStopPoints.Add(point);
+                        }
+                        else
+                        {
+                            if (potentialStopPoints.Any())
+                            {
+                                var stopDuration = (potentialStopPoints.Last().Timestamp - potentialStopPoints.First().Timestamp).TotalMinutes;
+                                if (stopDuration >= MIN_STOP_DURATION_MINUTES)
+                                {
+                                    var stopEvent = await CreateStopEvent(potentialStopPoints, engineerId, dbContext);
+                                    newEvents.Add(stopEvent);
+                                }
+                                potentialStopPoints.Clear();
+                            }
+                        }
                     }
-                    currentCluster = new List<LocationPoint> { currentPoint };
+
+                    if (potentialStopPoints.Any())
+                    {
+                        var stopDuration = (potentialStopPoints.Last().Timestamp - potentialStopPoints.First().Timestamp).TotalMinutes;
+                        if (stopDuration >= MIN_STOP_DURATION_MINUTES)
+                        {
+                            var stopEvent = await CreateStopEvent(potentialStopPoints, engineerId, dbContext);
+                            newEvents.Add(stopEvent);
+                        }
+                    }
+
+                    var allEvents = (lastEvent != null ? new List<ActivityEvent> { lastEvent } : new List<ActivityEvent>())
+                        .Concat(newEvents)
+                        .OrderBy(e => e.StartTime)
+                        .ToList();
+
+                    for (int i = 0; i < allEvents.Count; i++)
+                    {
+                        var currentEvent = allEvents[i];
+                        DateTime driveStartTime = currentEvent.EndTime;
+                        DateTime driveEndTime = (i + 1 < allEvents.Count) ? allEvents[i + 1].StartTime : DateTime.MaxValue;
+
+                        var drivePoints = pointsToProcess
+                            .Where(p => p.Timestamp > driveStartTime && p.Timestamp < driveEndTime)
+                            .ToList();
+
+                        if (drivePoints.Count >= MIN_DRIVE_POINTS)
+                        {
+                            // CORRECTED: Pass dbContext to CreateDriveEvent
+                            var driveEvent = await CreateDriveEvent(drivePoints, engineerId, dbContext);
+                            newEvents.Add(driveEvent);
+                        }
+                    }
+
+                    if (newEvents.Any())
+                    {
+                        await dbContext.ActivityEvents.AddRangeAsync(newEvents);
+                    }
+
+                    pointsToProcess.ForEach(p => p.IsProcessed = true);
+                    await dbContext.SaveChangesAsync();
+                    _logger.LogInformation($"Finished processing for Engineer ID: {engineerId}. Found {newEvents.Count} new activities.");
                 }
             }
-            // Process the final cluster after the loop
-            if (currentCluster.Count > 1) {
-                var clusterDuration = currentCluster.Last().Timestamp - currentCluster.First().Timestamp;
-                if (clusterDuration.TotalMinutes >= MIN_STOP_DURATION_MINUTES)
+        }
+
+        private async Task<ActivityEvent> CreateStopEvent(List<LocationPoint> stopPoints, int engineerId, AppDbContext dbContext)
+        {
+            var firstPoint = stopPoints.First();
+            var lastPoint = stopPoints.Last();
+            var averageLat = stopPoints.Average(p => p.Latitude);
+            var averageLon = stopPoints.Average(p => p.Longitude);
+
+            var (_, address) = await ReverseGeocodeAsync(averageLat, averageLon, dbContext);
+
+            return new ActivityEvent
+            {
+                FieldEngineerId = engineerId,
+                Type = EventType.Stop,
+                StartTime = firstPoint.Timestamp,
+                EndTime = lastPoint.Timestamp,
+                DurationMinutes = (int)(lastPoint.Timestamp - firstPoint.Timestamp).TotalMinutes,
+                Address = address,
+                Latitude = averageLat,
+                Longitude = averageLon
+            };
+        }
+
+        // CORRECTED: Added dbContext parameter
+        private async Task<ActivityEvent> CreateDriveEvent(List<LocationPoint> drivePoints, int engineerId, AppDbContext dbContext)
+        {
+            var firstPoint = drivePoints.First();
+            var lastPoint = drivePoints.Last();
+            double totalDistance = 0;
+            for (int i = 0; i < drivePoints.Count - 1; i++)
+            {
+                totalDistance += HaversineDistance(drivePoints[i], drivePoints[i + 1]);
+            }
+
+            var (_, startAddress) = await ReverseGeocodeAsync(firstPoint.Latitude, firstPoint.Longitude, dbContext);
+            var (_, endAddress) = await ReverseGeocodeAsync(lastPoint.Latitude, lastPoint.Longitude, dbContext);
+
+            return new ActivityEvent
+            {
+                FieldEngineerId = engineerId,
+                Type = EventType.Drive,
+                StartTime = firstPoint.Timestamp,
+                EndTime = lastPoint.Timestamp,
+                DurationMinutes = (int)(lastPoint.Timestamp - firstPoint.Timestamp).TotalMinutes,
+                DistanceKm = totalDistance,
+                TopSpeedKmh = drivePoints.Max(p => p.Speed ?? 0) * 3.6, // Convert m/s to km/h
+                StartLatitude = firstPoint.Latitude,
+                StartLongitude = firstPoint.Longitude,
+                EndLatitude = lastPoint.Latitude,
+                EndLongitude = lastPoint.Longitude,
+                StartAddress = startAddress,
+                EndAddress = endAddress
+            };
+        }
+
+        // CORRECTED: Added dbContext parameter and use _httpClientFactory
+        private async Task<(string, string)> ReverseGeocodeAsync(double lat, double lon, AppDbContext dbContext)
+        {
+            var httpClient = _httpClientFactory.CreateClient();
+            var apiKey = "pk.eyJ1IjoiYmFzaWwxLTIzIiwiYSI6ImNsa3ZudnZqZDBpZ2szZHFxZ3NqYjB6d2cifQ.Xb3Jp3a_UKWv3yN4nJ5A7A";
+            var url = $"https://api.mapbox.com/geocoding/v5/mapbox.places/{lon},{lat}.json?access_token={apiKey}";
+
+            try
+            {
+                var response = await httpClient.GetAsync(url);
+                if (response.IsSuccessStatusCode)
                 {
-                    var stopEvent = await CreateStopEvent(currentCluster, engineerId);
-                    allStops.Add(stopEvent);
+                    var jsonString = await response.Content.ReadAsStringAsync();
+                    using (var jsonDoc = JsonDocument.Parse(jsonString))
+                    {
+                        var features = jsonDoc.RootElement.GetProperty("features");
+                        if (features.GetArrayLength() > 0)
+                        {
+                            var placeName = features[0].GetProperty("place_name").GetString() ?? "Unknown Address";
+                            var context = features[0].GetProperty("context");
+                            var locality = context.EnumerateArray().FirstOrDefault(c => c.GetProperty("id").GetString().StartsWith("locality")).GetProperty("text").GetString() ?? "Unknown City";
+                            return (locality, placeName);
+                        }
+                    }
                 }
             }
-
-            newEvents.AddRange(allStops);
-            _logger.LogInformation($"Pass 1 complete. Found {allStops.Count} stops for engineer {engineerId}.");
-
-            // PASS 2: Define "Drives" as the points between the stops.
-            DateTime lastEventEndTime = points.First().Timestamp;
-            
-            foreach (var stop in allStops.OrderBy(s => s.StartTime))
+            catch (Exception ex)
             {
-                var drivePoints = points.Where(p => p.Timestamp > lastEventEndTime && p.Timestamp < stop.StartTime).ToList();
-                if (drivePoints.Count > 1)
-                {
-                    var driveEvent = await CreateDriveEvent(drivePoints, engineerId);
-                    newEvents.Add(driveEvent);
-                }
-                lastEventEndTime = stop.EndTime;
+                _logger.LogError(ex, "Error during reverse geocoding.");
             }
-
-            // --- END OF NEW ALGORITHM ---
-            
-            if (newEvents.Any())
-            {
-                await context.ActivityEvents.AddRangeAsync(newEvents);
-            }
-            
-            // Clean up the processed raw points
-            context.LocationPoints.RemoveRange(points);
-            await context.SaveChangesAsync();
-            
-            _logger.LogInformation($"Processing complete. Created {newEvents.Count} new events for engineer {engineerId}.");
-        }
-    }
-}
-
-    private async Task<ActivityEvent> CreateStopEvent(List<LocationPoint> cluster, int engineerId)
-    {
-        var startTime = cluster.First().Timestamp;
-        var endTime = cluster.Last().Timestamp;
-        var avgLat = cluster.Average(p => p.Latitude);
-        var avgLng = cluster.Average(p => p.Longitude);
-
-        // TODO: Call a real reverse geocoding service here
-        var (locationName, address) = await ReverseGeocodeAsync(avgLat, avgLng);
-        
-        return new ActivityEvent
-        {
-            FieldEngineerId = engineerId,
-            Type = EventType.Stop,
-            StartTime = startTime,
-            EndTime = endTime,
-            DurationMinutes = (int)(endTime - startTime).TotalMinutes,
-            Latitude = avgLat,
-            Longitude = avgLng,
-            LocationName = locationName,
-            Address = address,
-        };
-    }
-
-    private async Task<ActivityEvent> CreateDriveEvent(List<LocationPoint> drivePoints, int engineerId)
-    {
-        double totalDistanceKm = 0;
-        for (int i = 0; i < drivePoints.Count - 1; i++)
-        {
-            totalDistanceKm += CalculateDistance(drivePoints[i], drivePoints[i+1]) / 1000.0;
+            return ("Unknown", "Unknown Address");
         }
 
-        var startPoint = drivePoints.First();
-        var endPoint = drivePoints.Last();
-
-        // Geocode start and end addresses
-        var (_, startAddress) = await ReverseGeocodeAsync(startPoint.Latitude, startPoint.Longitude);
-        var (_, endAddress) = await ReverseGeocodeAsync(endPoint.Latitude, endPoint.Longitude);
-
-        return new ActivityEvent
+        private double HaversineDistance(LocationPoint p1, LocationPoint p2)
         {
-            FieldEngineerId = engineerId,
-            Type = EventType.Drive,
-            StartTime = drivePoints.First().Timestamp,
-            EndTime = drivePoints.Last().Timestamp,
-            DurationMinutes = (int)(drivePoints.Last().Timestamp - drivePoints.First().Timestamp).TotalMinutes,
-            DistanceKm = totalDistanceKm,
-            TopSpeedKmh = drivePoints.Max(p => p.Speed ?? 0) * 3.6, // Convert m/s to km/h
-            StartLatitude = startPoint.Latitude,
-            StartLongitude = startPoint.Longitude,
-            StartAddress = startAddress,
-            EndLatitude = endPoint.Latitude,
-            EndLongitude = endPoint.Longitude,
-            EndAddress = endAddress,
-        };
-    }
-
-    // --- Helper & External API Methods ---
-
-    private double CalculateDistance(LocationPoint p1, LocationPoint p2)
-    {
-        var d1 = p1.Latitude * (Math.PI / 180.0);
-        var num1 = p1.Longitude * (Math.PI / 180.0);
-        var d2 = p2.Latitude * (Math.PI / 180.0);
-        var num2 = p2.Longitude * (Math.PI / 180.0) - num1;
-        var d3 = Math.Pow(Math.Sin((d2 - d1) / 2.0), 2.0) + Math.Cos(d1) * Math.Cos(d2) * Math.Pow(Math.Sin(num2 / 2.0), 2.0);
-        return 6376500.0 * (2.0 * Math.Atan2(Math.Sqrt(d3), Math.Sqrt(1.0 - d3)));
-    }
-    
-    private async Task<(string LocationName, string Address)> ReverseGeocodeAsync(double lat, double lng)
-{
-    // The URL for the Mapbox Geocoding API
-    var url = $"https://api.mapbox.com/geocoding/v5/mapbox.places/{lng},{lat}.json?types=poi,address&access_token={MAPBOX_API_KEY}";
-
-    try
-    {
-        var response = await _httpClient.GetAsync(url);
-        if (!response.IsSuccessStatusCode)
-        {
-            _logger.LogError($"Mapbox API error: {response.StatusCode}");
-            return ($"Location near {lat:F3}, {lng:F3}", "Address lookup failed");
+            var R = 6371; // Radius of Earth in kilometers
+            var dLat = (p2.Latitude - p1.Latitude) * (Math.PI / 180);
+            var dLon = (p2.Longitude - p1.Longitude) * (Math.PI / 180);
+            var a = Math.Sin(dLat / 2) * Math.Sin(dLat / 2) +
+                    Math.Cos(p1.Latitude * (Math.PI / 180)) * Math.Cos(p2.Latitude * (Math.PI / 180)) *
+                    Math.Sin(dLon / 2) * Math.Sin(dLon / 2);
+            var c = 2 * Math.Atan2(Math.Sqrt(a), Math.Sqrt(1 - a));
+            return R * c;
         }
 
-        var jsonString = await response.Content.ReadAsStringAsync();
-        using (var jsonDoc = JsonDocument.Parse(jsonString))
+        public Task StopAsync(CancellationToken cancellationToken)
         {
-            var features = jsonDoc.RootElement.GetProperty("features");
-
-            if (features.GetArrayLength() > 0)
-            {
-                // Get the first, most relevant result
-                var firstFeature = features[0];
-                string placeName = firstFeature.GetProperty("text").GetString() ?? "Unknown Place";
-                string fullAddress = firstFeature.GetProperty("place_name").GetString() ?? "Address not available";
-                
-                _logger.LogInformation($"Geocoded ({lat},{lng}) to: {placeName}");
-                return (placeName, fullAddress);
-            }
+            _logger.LogInformation("Activity Processing Service is stopping.");
+            _timer?.Change(Timeout.Infinite, 0);
+            return Task.CompletedTask;
         }
-    }
-    catch (Exception ex)
-    {
-        _logger.LogError(ex, $"Exception during reverse geocoding for ({lat},{lng})");
-    }
 
-    // Fallback if anything goes wrong
-    return ($"Location near {lat:F3}, {lng:F3}", "Address not available");
-}
-
-
-    public Task StopAsync(CancellationToken cancellationToken)
-    {
-        _logger.LogInformation("Activity Processing Service is stopping.");
-        _timer?.Change(Timeout.Infinite, 0);
-        return Task.CompletedTask;
-    }
-
-    public void Dispose()
-    {
-        _timer?.Dispose();
+        public void Dispose()
+        {
+            _timer?.Dispose();
+        }
     }
 }

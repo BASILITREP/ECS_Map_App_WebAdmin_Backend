@@ -10,11 +10,8 @@ namespace EcsFeMappingApi.Models
         public int FieldEngineerId { get; set; }
         public double Latitude { get; set; }
         public double Longitude { get; set; }
-        public double? Speed { get; set; }
+        public double? Speed { get; set; } // Speed in meters per second
         public DateTime Timestamp { get; set; }
-        public string? Address { get; set; }
-        public double? Accuracy { get; set; }
-    
-        
+        public bool IsProcessed { get; set; } = false; // ADD THIS LINE
     }
 }
