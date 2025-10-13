@@ -199,6 +199,23 @@ namespace EcsFeMappingApi.Controllers
             }
         }
 
+        [HttpGet("{fieldEngineerId}/activity")]
+        public async Task<IActionResult> GetFieldEngineerActivity(int fieldEngineerId)
+        {
+            var engineerExists = await _context.FieldEngineers.AnyAsync(fe => fe.Id == fieldEngineerId);
+            if (!engineerExists)
+            {
+                return NotFound($"Field engineer with ID {fieldEngineerId} not found.");
+            }
+
+            var activities = await _context.ActivityEvents
+                .Where(a => a.FieldEngineerId == fieldEngineerId)
+                .OrderByDescending(a => a.StartTime)
+                .ToListAsync();
+
+            return Ok(activities);
+        }
+
         [HttpPost("loginsync")]
 public async Task<ActionResult<FieldEngineer>> LoginSync([FromBody] LoginSyncRequest request)
 {

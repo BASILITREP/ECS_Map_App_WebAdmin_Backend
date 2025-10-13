@@ -62,14 +62,7 @@ builder.Services.AddCors(options =>
             .AllowAnyHeader()
             .AllowAnyMethod()
             .AllowCredentials()
-            .SetIsOriginAllowed(origin => 
-            {
-                // Allow localhost in any environment for testing
-                if (string.IsNullOrEmpty(origin)) return false;
-                if (origin.StartsWith("http://localhost") || origin.StartsWith("https://localhost")) return true;
-                if (origin.StartsWith("http://127.0.0.1") || origin.StartsWith("https://127.0.0.1")) return true;
-                return true; // For production testing - remove this later for security
-            });
+            
     });
 });
 
