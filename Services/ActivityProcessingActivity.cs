@@ -18,7 +18,7 @@ namespace EcsFeMappingApi.Services
     {
         // Constants for activity detection logic
         private const double STOP_SPEED_THRESHOLD_MS = 1.4; // Speed less than 5 km/h
-        private const double MIN_STOP_DURATION_MINUTES = 5;
+        private const double MIN_STOP_DURATION_MINUTES = 1;
         private const int MIN_DRIVE_POINTS = 2;
 
         private readonly ILogger<ActivityProcessingService> _logger;
