@@ -61,7 +61,7 @@ namespace EcsFeMappingApi.Services
             using (var scope = _serviceProvider.CreateScope())
             {
                 var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-                _logger.LogInformation("Starting activity processing...");
+                _logger.LogInformation("[PROCESS] Starting activity processing...");
 
                 var engineersWithNewPoints = await dbContext.LocationPoints
                     .Where(p => !p.IsProcessed)
@@ -69,25 +69,33 @@ namespace EcsFeMappingApi.Services
                     .Distinct()
                     .ToListAsync();
 
+                if (!engineersWithNewPoints.Any())
+                {
+                    _logger.LogInformation("[PROCESS] No engineers with new points to process. Exiting.");
+                    return;
+                }
+
                 foreach (var engineerId in engineersWithNewPoints)
                 {
-                    _logger.LogInformation($"Processing activities for Engineer ID: {engineerId}");
-
-                    var lastEvent = await dbContext.ActivityEvents
-                        .Where(e => e.FieldEngineerId == engineerId)
-                        .OrderByDescending(e => e.EndTime)
-                        .FirstOrDefaultAsync();
+                    _logger.LogInformation($"[PROCESS] Processing activities for Engineer ID: {engineerId}");
                     
                     var pointsToProcess = await dbContext.LocationPoints
                         .Where(p => p.FieldEngineerId == engineerId && !p.IsProcessed)
                         .OrderBy(p => p.Timestamp)
                         .ToListAsync();
 
-                    if (!pointsToProcess.Any()) continue;
+                    if (!pointsToProcess.Any())
+                    {
+                        _logger.LogWarning($"[PROCESS] Engineer {engineerId} was in the list but has no unprocessed points. Skipping.");
+                        continue;
+                    }
+                    
+                    _logger.LogInformation($"[PROCESS] Found {pointsToProcess.Count} points to process for engineer {engineerId}.");
 
                     var newEvents = new List<ActivityEvent>();
                     var potentialStopPoints = new List<LocationPoint>();
 
+                    // This loop identifies STOPS first
                     foreach (var point in pointsToProcess)
                     {
                         if ((point.Speed ?? 0) < STOP_SPEED_THRESHOLD_MS)
@@ -99,8 +107,10 @@ namespace EcsFeMappingApi.Services
                             if (potentialStopPoints.Any())
                             {
                                 var stopDuration = (potentialStopPoints.Last().Timestamp - potentialStopPoints.First().Timestamp).TotalMinutes;
+                                _logger.LogInformation($"[PROCESS] Potential stop ended. Duration: {stopDuration} minutes. Points: {potentialStopPoints.Count}");
                                 if (stopDuration >= MIN_STOP_DURATION_MINUTES)
                                 {
+                                    _logger.LogInformation($"[PROCESS] CONFIRMED STOP of {stopDuration} minutes. Creating event.");
                                     var stopEvent = await CreateStopEvent(potentialStopPoints, engineerId, dbContext);
                                     newEvents.Add(stopEvent);
                                 }
@@ -149,7 +159,7 @@ namespace EcsFeMappingApi.Services
 
                     pointsToProcess.ForEach(p => p.IsProcessed = true);
                     await dbContext.SaveChangesAsync();
-                    _logger.LogInformation($"Finished processing for Engineer ID: {engineerId}. Found {newEvents.Count} new activities.");
+                    _logger.LogInformation($"[PROCESS] Finished processing for Engineer ID: {engineerId}. Found {newEvents.Count} new activities.");
                 }
             }
         }
