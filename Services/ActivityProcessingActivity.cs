@@ -26,7 +26,8 @@ namespace EcsFeMappingApi.Services
 
 
         private readonly ILogger<ActivityProcessingService> _logger;
-        private readonly IServiceProvider _serviceProvider;
+        private readonly IServiceScopeFactory _scopeFactory;
+        private readonly HttpClient _httpClient;
         private Timer? _timer;
 
         
@@ -56,9 +57,17 @@ namespace EcsFeMappingApi.Services
             Task.Run(async () => await ProcessActivities());
         }
 
+        public Task TriggerProcessingAsync()
+        {
+            _logger.LogInformation("Manual activity processing triggered.");
+            // We don't want to wait for this, so we don't await it.
+            _ = Task.Run(async () => await ProcessActivities());
+            return Task.CompletedTask;
+        }
+
         private async Task ProcessActivities()
         {
-            using (var scope = _serviceProvider.CreateScope())
+            using (var scope = _scopeFactory.CreateScope())
             {
                 var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 _logger.LogInformation("Starting activity processing...");
@@ -166,7 +175,7 @@ namespace EcsFeMappingApi.Services
             var averageLat = stopPoints.Average(p => p.Latitude);
             var averageLon = stopPoints.Average(p => p.Longitude);
 
-            var (_, address) = await ReverseGeocodeAsync(averageLat, averageLon, dbContext);
+            var (_, address) = await ReverseGeocodeAsync(averageLat, averageLon);
 
             return new ActivityEvent
             {
@@ -226,7 +235,7 @@ namespace EcsFeMappingApi.Services
             return 6376500.0 * (2.0 * Math.Atan2(Math.Sqrt(d3), Math.Sqrt(1.0 - d3)));
         }
         
-        private async Task<(string LocationName, string Address)> ReverseGeocodeAsync(double lat, double lng, AppDbContext dbContext)
+        private async Task<(string LocationName, string Address)> ReverseGeocodeAsync(double lat, double lng)
         {
             // The URL for the Mapbox Geocoding API
             var url = $"https://api.mapbox.com/geocoding/v5/mapbox.places/{lng},{lat}.json?types=poi,address&access_token={MAPBOX_API_KEY}";
