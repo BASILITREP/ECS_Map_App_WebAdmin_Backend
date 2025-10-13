@@ -104,7 +104,7 @@ using (var scope = app.Services.CreateScope())
     try
     {
         var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        await context.Database.EnsureCreatedAsync();
+        await context.Database.MigrateAsync();
         Console.WriteLine("✅ Railway database tables created successfully!");
     }
     catch (Exception ex)
