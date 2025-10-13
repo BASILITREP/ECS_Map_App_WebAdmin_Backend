@@ -115,6 +115,8 @@ app.UseSwaggerUI(c =>
     c.RoutePrefix = "swagger"; // Access via /swagger
 });
 
+app.UseRouting();
+
 // Important: Use CORS before other middleware
 app.UseCors("AllowFrontend");
 
