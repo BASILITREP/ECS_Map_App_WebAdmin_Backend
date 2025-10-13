@@ -4,6 +4,7 @@ using EcsFeMappingApi.Models;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
+using EcsFeMappingApi.Services; // ADD THIS
 
 namespace EcsFeMappingApi.Controllers
 {
@@ -12,10 +13,13 @@ namespace EcsFeMappingApi.Controllers
     public class LocationController : ControllerBase
     {
         private readonly AppDbContext _context;
+        private readonly ActivityProcessingService _activityProcessor; // ADD THIS
 
-        public LocationController(AppDbContext context)
+        // UPDATE THE CONSTRUCTOR
+        public LocationController(AppDbContext context, ActivityProcessingService activityProcessor)
         {
             _context = context;
+            _activityProcessor = activityProcessor; // ADD THIS
         }
 
         // GET: api/Location/{feId}
@@ -45,8 +49,11 @@ namespace EcsFeMappingApi.Controllers
                 
                 Console.WriteLine($"✅ Saved {points.Count} location points to database");
 
+                // --- ADD THIS LINE TO TRIGGER PROCESSING ---
+                await _activityProcessor.TriggerProcessingAsync();
+
                 return Ok(new { 
-                    message = "Location points saved successfully", 
+                    message = "Location points saved and processed successfully", 
                     count = points.Count 
                 });
             }
