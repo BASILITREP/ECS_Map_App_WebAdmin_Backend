@@ -208,8 +208,9 @@ namespace EcsFeMappingApi.Services
         private async Task<(string LocationName, string Address)> ReverseGeocodeAsync(double lat, double lon, AppDbContext dbContext)
         {
             var httpClient = _httpClientFactory.CreateClient();
+            // TODO: Move API Key to appsettings.json or other configuration provider
             var apiKey = "pk.eyJ1IjoiYmFzaWwxLTIzIiwiYSI6ImNsa3ZudnZqZDBpZ2szZHFxZ3NqYjB6d2cifQ.Xb3Jp3a_UKWv3yN4nJ5A7A";
-            var url = $"https://api.mapbox.com/geocoding/v5/mapbox.places/{lon},{lat}.json?access_token={apiKey}";
+            var url = $"https://api.mapbox.com/geocoding/v5/mapbox.places/{lon},{lat}.json?types=poi,address,neighborhood,locality,place&access_token={apiKey}";
 
             try
             {
@@ -223,17 +224,12 @@ namespace EcsFeMappingApi.Services
                         if (features.GetArrayLength() > 0)
                         {
                             var feature = features[0];
-                            var placeName = feature.TryGetProperty("place_name", out var placeNameProp) ? placeNameProp.GetString() ?? "Unknown Address" : "Unknown Address";
+                            var address = feature.TryGetProperty("place_name", out var placeNameProp) ? placeNameProp.GetString() ?? "Unknown Address" : "Unknown Address";
                             
-                            string locationName = "Unknown";
-                            if (feature.TryGetProperty("context", out var contextProp))
-                            {
-                                locationName = contextProp.EnumerateArray()
-                                    .FirstOrDefault(c => c.TryGetProperty("id", out var idProp) && (idProp.GetString()?.StartsWith("locality") ?? false))
-                                    .GetProperty("text").GetString() ?? "Unknown";
-                            }
+                            // Use the first part of the address as the location name
+                            var locationName = address.Split(',').FirstOrDefault()?.Trim() ?? "Unknown";
                             
-                            return (locationName, placeName);
+                            return (locationName, address);
                         }
                     }
                 }
