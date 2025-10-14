@@ -209,8 +209,9 @@ namespace EcsFeMappingApi.Services
         {
             var httpClient = _httpClientFactory.CreateClient();
             // TODO: Move API Key to appsettings.json or other configuration provider
-            var apiKey = "pk.eyJ1IjoiYmFzaWwxLTIzIiwiYSI6ImNsa3ZudnZqZDBpZ2szZHFxZ3NqYjB6d2cifQ.Xb3Jp3a_UKWv3yN4nJ5A7A";
-            var url = $"https://api.mapbox.com/geocoding/v5/mapbox.places/{lon},{lat}.json?types=poi,address,neighborhood,locality,place&access_token={apiKey}";
+            // Using the API key from your old, working code.
+            var apiKey = "pk.eyJ1IjoiYmFzaWwxLTIzIiwiYSI6ImNtZWFvNW43ZTA0ejQycHBtd3dkMHJ1bnkifQ.Y-IlM-vQAlaGr7pVQnug3Q";
+            var url = $"https://api.mapbox.com/geocoding/v5/mapbox.places/{lon},{lat}.json?types=poi,address&access_token={apiKey}";
 
             try
             {
@@ -224,10 +225,9 @@ namespace EcsFeMappingApi.Services
                         if (features.GetArrayLength() > 0)
                         {
                             var feature = features[0];
+                            // Using the logic from your old code to get location name and address
+                            var locationName = feature.TryGetProperty("text", out var textProp) ? textProp.GetString() ?? "Unknown" : "Unknown";
                             var address = feature.TryGetProperty("place_name", out var placeNameProp) ? placeNameProp.GetString() ?? "Unknown Address" : "Unknown Address";
-                            
-                            // Use the first part of the address as the location name
-                            var locationName = address.Split(',').FirstOrDefault()?.Trim() ?? "Unknown";
                             
                             return (locationName, address);
                         }
