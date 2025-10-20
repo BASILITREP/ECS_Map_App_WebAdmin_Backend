@@ -11,6 +11,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Collections.Generic;
+using Microsoft.AspNetCore.StaticAssets;
 
 namespace EcsFeMappingApi.Services
 {
@@ -95,48 +96,119 @@ namespace EcsFeMappingApi.Services
             }
         }
 
-        private async Task<List<ActivityEvent>> DetectEvents(List<LocationPoint> points, int engineerId, AppDbContext dbContext)
+        private async Task<List<ActivityEvent>> DetectEvents(List<LocationPoint> locationPoints, int engineerId, AppDbContext dbContext)
         {
+            // Life360-style trip grouping logic
             var events = new List<ActivityEvent>();
-            if (points.Count == 0) return events;
+            if (locationPoints.Count == 0) return events;
 
-            var currentSegment = new List<LocationPoint>();
-            bool isCurrentlyStopped = (points.First().Speed ?? 0) < STOP_SPEED_THRESHOLD_MS;
+            const double MOVE_SPEED_THRESHOLD_KMH = 8.0;
+            const double STOP_SPEED_THRESHOLD_KMH = 3.0;
+            const double MIN_TRIP_DISTANCE_KM = 0.1;
+            const int MIN_STOP_DURATION_MIN = 5;
+            const int MIN_TRIP_DURATION_MIN = 1;
+            const double STAY_RADIUS_METERS = 100;
 
-            foreach (var point in points)
+            var currentDrivePoints = new List<LocationPoint>();
+            LocationPoint? lastStopPoint = null;
+            ActivityEvent? lastStopEvent = null;
+            bool isMoving = false;
+
+            foreach (var point in locationPoints)
             {
-                bool isStopped = (point.Speed ?? 0) < STOP_SPEED_THRESHOLD_MS;
+                double speedKmh = (point.Speed ?? 0) * 3.6;
 
-                if (isStopped == isCurrentlyStopped)
+                if (speedKmh > MOVE_SPEED_THRESHOLD_KMH)
                 {
-                    currentSegment.Add(point);
+                    // Field Engineer is moving
+                    isMoving = true;
+                    currentDrivePoints.Add(point);
                 }
                 else
                 {
-                    // The type of movement has changed, so process the completed segment
-                    if (currentSegment.Any())
+                    // Field Engineer is stopped or moving slowly
+                    if (isMoving && currentDrivePoints.Count > 1)
                     {
-                        var newEvent = isCurrentlyStopped
-                            ? await CreateStopEvent(currentSegment, engineerId, dbContext)
-                            : await CreateDriveEvent(currentSegment, engineerId, dbContext);
-                        
-                        if (newEvent != null) events.Add(newEvent);
+                        double tripDistance = 0;
+                        for (int i = 0; i < currentDrivePoints.Count - 1; i++)
+                            tripDistance += HaversineDistance(currentDrivePoints[i], currentDrivePoints[i + 1]);
+
+                        var tripDuration = (currentDrivePoints.Last().Timestamp - currentDrivePoints.First().Timestamp).TotalMinutes;
+
+                        if (tripDistance >= MIN_TRIP_DISTANCE_KM && tripDuration >= MIN_TRIP_DURATION_MIN)
+                        {
+                            var driveEvent = await CreateDriveEvent(currentDrivePoints, engineerId, dbContext);
+                            if (driveEvent != null)
+                                events.Add(driveEvent);
+                        }
+
+                        currentDrivePoints.Clear();
                     }
 
-                    // Start a new segment
-                    currentSegment = new List<LocationPoint> { point };
-                    isCurrentlyStopped = isStopped;
+                    isMoving = false;
+
+                    // Detect or extend stop event
+                    if (lastStopEvent == null)
+                    {
+                        lastStopPoint = point;
+                        lastStopEvent = new ActivityEvent
+                        {
+                            FieldEngineerId = engineerId,
+                            Type = EventType.Stop,
+                            StartTime = point.Timestamp,
+                            StartLatitude = point.Latitude,
+                            StartLongitude = point.Longitude,
+                            EndTime = point.Timestamp
+                        };
+                    }
+                    else
+                    {
+                        var distFromLast = HaversineDistance(
+                            new LocationPoint { Latitude = point.Latitude, Longitude = point.Longitude },
+                            new LocationPoint { Latitude = lastStopEvent.StartLatitude ?? 0, Longitude = lastStopEvent.StartLongitude ?? 0 }
+                        ) * 1000.0; // meters
+
+                        if (distFromLast <= STAY_RADIUS_METERS)
+                        {
+                            lastStopEvent.EndTime = point.Timestamp;
+                        }
+                        else
+                        {
+                            var stayDuration = (lastStopEvent.EndTime - lastStopEvent.StartTime).TotalMinutes;
+                            if (stayDuration >= MIN_STOP_DURATION_MIN)
+                            {
+                                lastStopEvent.DurationMinutes = (int)stayDuration;
+                                events.Add(lastStopEvent);
+                            }
+
+                            lastStopEvent = new ActivityEvent
+                            {
+                                FieldEngineerId = engineerId,
+                                Type = EventType.Stop,
+                                StartTime = point.Timestamp,
+                                StartLatitude = point.Latitude,
+                                StartLongitude = point.Longitude,
+                                EndTime = point.Timestamp
+                            };
+                        }
+                    }
                 }
             }
 
-            // Process the last remaining segment
-            if (currentSegment.Any())
+            if (isMoving && currentDrivePoints.Count > 1)
             {
-                var lastEvent = isCurrentlyStopped
-                    ? await CreateStopEvent(currentSegment, engineerId, dbContext)
-                    : await CreateDriveEvent(currentSegment, engineerId, dbContext);
-
-                if (lastEvent != null) events.Add(lastEvent);
+                var driveEvent = await CreateDriveEvent(currentDrivePoints, engineerId, dbContext);
+                if (driveEvent != null)
+                    events.Add(driveEvent);
+            }
+            else if (lastStopEvent != null)
+            {
+                var stayDuration = (lastStopEvent.EndTime - lastStopEvent.StartTime).TotalMinutes;
+                if (stayDuration >= MIN_STOP_DURATION_MIN)
+                {
+                    lastStopEvent.DurationMinutes = (int)stayDuration;
+                    events.Add(lastStopEvent);
+                }
             }
 
             return events;
@@ -173,60 +245,52 @@ namespace EcsFeMappingApi.Services
         }
 
         private async Task<ActivityEvent?> CreateDriveEvent(List<LocationPoint> drivePoints, int engineerId, AppDbContext dbContext)
-{
-    if (drivePoints.Count < MIN_DRIVE_POINTS) return null;
+        {
+            if (drivePoints.Count < MIN_DRIVE_POINTS) return null;
 
-    var firstPoint = drivePoints.First();
-    var lastPoint = drivePoints.Last();
+            var firstPoint = drivePoints.First();
+            var lastPoint = drivePoints.Last();
 
-    // ✅ Compute total distance using all GPS points
-    double totalDistance = 0;
-    for (int i = 0; i < drivePoints.Count - 1; i++)
-    {
-        totalDistance += HaversineDistance(drivePoints[i], drivePoints[i + 1]);
-    }
+            // ✅ Compute total distance using all GPS points
+            double totalDistance = 0;
+            for (int i = 0; i < drivePoints.Count - 1; i++)
+            {
+                totalDistance += HaversineDistance(drivePoints[i], drivePoints[i + 1]);
+            }
 
-    // ✅ Optional: Smooth the route slightly (remove GPS jitter)
-    // Only keep one point every ~15 meters to reduce data size
-    var simplifiedPoints = new List<LocationPoint> { firstPoint };
-    const double minDistanceMeters = 0.015; // ~15 meters
-    for (int i = 1; i < drivePoints.Count; i++)
-    {
-        var prev = simplifiedPoints.Last();
-        var distKm = HaversineDistance(prev, drivePoints[i]);
-        if (distKm >= minDistanceMeters)
-            simplifiedPoints.Add(drivePoints[i]);
-    }
+            // ✅ Optional: Smooth the route slightly (remove GPS jitter)
+            // Only keep one point every ~15 meters to reduce data size
+            var simplifiedPoints = DouglasPeucker.Simplify(drivePoints, 20); // 20 meters tolerance
 
-    // ✅ Build coordinate list for visualization
-    var coordinatePairs = simplifiedPoints.Select(p => new double[] { p.Longitude, p.Latitude }).ToList();
-    string routePathJson = JsonSerializer.Serialize(coordinatePairs);
+            // ✅ Build coordinate list for visualization
+            var coordinatePairs = simplifiedPoints.Select(p => new double[] { p.Longitude, p.Latitude }).ToList();
+            string routePathJson = JsonSerializer.Serialize(coordinatePairs);
 
-    // ✅ Reverse geocode start and end points
-    var (_, startAddress) = await ReverseGeocodeAsync(firstPoint.Latitude, firstPoint.Longitude, dbContext);
-    var (_, endAddress) = await ReverseGeocodeAsync(lastPoint.Latitude, lastPoint.Longitude, dbContext);
+            // ✅ Reverse geocode start and end points
+            var (_, startAddress) = await ReverseGeocodeAsync(firstPoint.Latitude, firstPoint.Longitude, dbContext);
+            var (_, endAddress) = await ReverseGeocodeAsync(lastPoint.Latitude, lastPoint.Longitude, dbContext);
 
-    // ✅ Construct the Drive ActivityEvent
-    return new ActivityEvent
-    {
-        FieldEngineerId = engineerId,
-        Type = EventType.Drive,
-        StartTime = firstPoint.Timestamp,
-        EndTime = lastPoint.Timestamp,
-        DurationMinutes = (int)(lastPoint.Timestamp - firstPoint.Timestamp).TotalMinutes,
-        DistanceKm = totalDistance,
-        TopSpeedKmh = drivePoints.Max(p => p.Speed ?? 0) * 3.6,
-        StartLatitude = firstPoint.Latitude,
-        StartLongitude = firstPoint.Longitude,
-        EndLatitude = lastPoint.Latitude,
-        EndLongitude = lastPoint.Longitude,
-        StartAddress = startAddress,
-        EndAddress = endAddress,
+            // ✅ Construct the Drive ActivityEvent
+            return new ActivityEvent
+            {
+                FieldEngineerId = engineerId,
+                Type = EventType.Drive,
+                StartTime = firstPoint.Timestamp,
+                EndTime = lastPoint.Timestamp,
+                DurationMinutes = (int)(lastPoint.Timestamp - firstPoint.Timestamp).TotalMinutes,
+                DistanceKm = totalDistance,
+                TopSpeedKmh = drivePoints.Max(p => p.Speed ?? 0) * 3.6,
+                StartLatitude = firstPoint.Latitude,
+                StartLongitude = firstPoint.Longitude,
+                EndLatitude = lastPoint.Latitude,
+                EndLongitude = lastPoint.Longitude,
+                StartAddress = startAddress,
+                EndAddress = endAddress,
 
-        // ✅ New field: JSON path of the actual GPS route
-        RoutePathJson = routePathJson
-    };
-}
+                // ✅ New field: JSON path of the actual GPS route
+                RoutePathJson = routePathJson
+            };
+        }
 
 
         private async Task<(string LocationName, string Address)> ReverseGeocodeAsync(double lat, double lon, AppDbContext dbContext)
@@ -252,7 +316,7 @@ namespace EcsFeMappingApi.Services
                             // Using the logic from your old code to get location name and address
                             var locationName = feature.TryGetProperty("text", out var textProp) ? textProp.GetString() ?? "Unknown" : "Unknown";
                             var address = feature.TryGetProperty("place_name", out var placeNameProp) ? placeNameProp.GetString() ?? "Unknown Address" : "Unknown Address";
-                            
+
                             return (locationName, address);
                         }
                     }
@@ -287,6 +351,80 @@ namespace EcsFeMappingApi.Services
             _timer?.Change(Timeout.Infinite, 0);
             return Task.CompletedTask;
         }
+
+        //Douglas Peucker algorith
+        public static class DouglasPeucker
+        {
+            public static List<LocationPoint> Simplify(List<LocationPoint> points, double toleranceMeters)
+            {
+                if (points.Count < 3) return points;
+
+                double toleranceDegrees = toleranceMeters / 111_320.0; // rough conversion
+                int firstIndex = 0;
+                int lastIndex = points.Count - 1;
+                var keep = new bool[points.Count];
+                keep[firstIndex] = true;
+                keep[lastIndex] = true;
+
+                SimplifySection(points, firstIndex, lastIndex, toleranceDegrees, keep);
+
+                var simplified = new List<LocationPoint>();
+                for (int i = 0; i < points.Count; i++)
+                {
+                    if (keep[i]) simplified.Add(points[i]);
+                }
+                return simplified;
+            }
+
+            private static void SimplifySection(List<LocationPoint> pts, int first, int last, double tolerance, bool[] keep)
+            {
+                if (last <= first + 1) return;
+
+                double maxDist = 0;
+                int index = 0;
+
+                var start = pts[first];
+                var end = pts[last];
+
+                for (int i = first + 1; i < last; i++)
+                {
+                    double dist = PerpendicularDistance(pts[i], start, end);
+                    if (dist > maxDist)
+                    {
+                        maxDist = dist;
+                        index = i;
+                    }
+                }
+
+                if (maxDist > tolerance)
+                {
+                    keep[index] = true;
+                    SimplifySection(pts, first, index, tolerance, keep);
+                    SimplifySection(pts, index, last, tolerance, keep);
+                }
+            }
+
+            private static double PerpendicularDistance(LocationPoint p, LocationPoint start, LocationPoint end)
+            {
+                double dx = end.Longitude - start.Longitude;
+                double dy = end.Latitude - start.Latitude;
+
+                if (dx == 0 && dy == 0)
+                    return Math.Sqrt(Math.Pow(p.Longitude - start.Longitude, 2) + Math.Pow(p.Latitude - start.Latitude, 2));
+
+                double t = ((p.Longitude - start.Longitude) * dx + (p.Latitude - start.Latitude) * dy) / (dx * dx + dy * dy);
+                if (t < 0)
+                    return Math.Sqrt(Math.Pow(p.Longitude - start.Longitude, 2) + Math.Pow(p.Latitude - start.Latitude, 2));
+                else if (t > 1)
+                    return Math.Sqrt(Math.Pow(p.Longitude - end.Longitude, 2) + Math.Pow(p.Latitude - end.Latitude, 2));
+
+                double projX = start.Longitude + t * dx;
+                double projY = start.Latitude + t * dy;
+                return Math.Sqrt(Math.Pow(p.Longitude - projX, 2) + Math.Pow(p.Latitude - projY, 2));
+            }
+        }
+
+
 
         public void Dispose()
         {
