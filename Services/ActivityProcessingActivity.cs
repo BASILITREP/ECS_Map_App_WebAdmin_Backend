@@ -173,37 +173,61 @@ namespace EcsFeMappingApi.Services
         }
 
         private async Task<ActivityEvent?> CreateDriveEvent(List<LocationPoint> drivePoints, int engineerId, AppDbContext dbContext)
-        {
-            if (drivePoints.Count < MIN_DRIVE_POINTS) return null;
+{
+    if (drivePoints.Count < MIN_DRIVE_POINTS) return null;
 
-            var firstPoint = drivePoints.First();
-            var lastPoint = drivePoints.Last();
-            double totalDistance = 0;
-            for (int i = 0; i < drivePoints.Count - 1; i++)
-            {
-                totalDistance += HaversineDistance(drivePoints[i], drivePoints[i + 1]);
-            }
+    var firstPoint = drivePoints.First();
+    var lastPoint = drivePoints.Last();
 
-            var (_, startAddress) = await ReverseGeocodeAsync(firstPoint.Latitude, firstPoint.Longitude, dbContext);
-            var (_, endAddress) = await ReverseGeocodeAsync(lastPoint.Latitude, lastPoint.Longitude, dbContext);
+    // ✅ Compute total distance using all GPS points
+    double totalDistance = 0;
+    for (int i = 0; i < drivePoints.Count - 1; i++)
+    {
+        totalDistance += HaversineDistance(drivePoints[i], drivePoints[i + 1]);
+    }
 
-            return new ActivityEvent
-            {
-                FieldEngineerId = engineerId,
-                Type = EventType.Drive,
-                StartTime = firstPoint.Timestamp,
-                EndTime = lastPoint.Timestamp,
-                DurationMinutes = (int)(lastPoint.Timestamp - firstPoint.Timestamp).TotalMinutes,
-                DistanceKm = totalDistance,
-                TopSpeedKmh = drivePoints.Max(p => p.Speed ?? 0) * 3.6,
-                StartLatitude = firstPoint.Latitude,
-                StartLongitude = firstPoint.Longitude,
-                EndLatitude = lastPoint.Latitude,
-                EndLongitude = lastPoint.Longitude,
-                StartAddress = startAddress,
-                EndAddress = endAddress
-            };
-        }
+    // ✅ Optional: Smooth the route slightly (remove GPS jitter)
+    // Only keep one point every ~15 meters to reduce data size
+    var simplifiedPoints = new List<LocationPoint> { firstPoint };
+    const double minDistanceMeters = 0.015; // ~15 meters
+    for (int i = 1; i < drivePoints.Count; i++)
+    {
+        var prev = simplifiedPoints.Last();
+        var distKm = HaversineDistance(prev, drivePoints[i]);
+        if (distKm >= minDistanceMeters)
+            simplifiedPoints.Add(drivePoints[i]);
+    }
+
+    // ✅ Build coordinate list for visualization
+    var coordinatePairs = simplifiedPoints.Select(p => new double[] { p.Longitude, p.Latitude }).ToList();
+    string routePathJson = JsonSerializer.Serialize(coordinatePairs);
+
+    // ✅ Reverse geocode start and end points
+    var (_, startAddress) = await ReverseGeocodeAsync(firstPoint.Latitude, firstPoint.Longitude, dbContext);
+    var (_, endAddress) = await ReverseGeocodeAsync(lastPoint.Latitude, lastPoint.Longitude, dbContext);
+
+    // ✅ Construct the Drive ActivityEvent
+    return new ActivityEvent
+    {
+        FieldEngineerId = engineerId,
+        Type = EventType.Drive,
+        StartTime = firstPoint.Timestamp,
+        EndTime = lastPoint.Timestamp,
+        DurationMinutes = (int)(lastPoint.Timestamp - firstPoint.Timestamp).TotalMinutes,
+        DistanceKm = totalDistance,
+        TopSpeedKmh = drivePoints.Max(p => p.Speed ?? 0) * 3.6,
+        StartLatitude = firstPoint.Latitude,
+        StartLongitude = firstPoint.Longitude,
+        EndLatitude = lastPoint.Latitude,
+        EndLongitude = lastPoint.Longitude,
+        StartAddress = startAddress,
+        EndAddress = endAddress,
+
+        // ✅ New field: JSON path of the actual GPS route
+        RoutePathJson = routePathJson
+    };
+}
+
 
         private async Task<(string LocationName, string Address)> ReverseGeocodeAsync(double lat, double lon, AppDbContext dbContext)
         {

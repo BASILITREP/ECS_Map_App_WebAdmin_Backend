@@ -13,6 +13,7 @@ namespace EcsFeMappingApi.Models
         public DateTime StartTime { get; set; }
         public DateTime EndTime { get; set; }
         public int DurationMinutes { get; set; }
+        public string? RoutePathJson { get; set; }
 
         //Drive Specific fields
         public double? DistanceKm { get; set; }
