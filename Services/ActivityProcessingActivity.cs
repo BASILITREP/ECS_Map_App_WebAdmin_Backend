@@ -267,6 +267,67 @@ namespace EcsFeMappingApi.Services
                 }
             }
 
+            // 🚀 SMART MERGE consecutive drives that are close in time and space
+            for (int i = 0; i < events.Count - 1; i++)
+            {
+                var current = events[i];
+                var next = events[i + 1];
+
+                if (current.Type == EventType.Drive && next.Type == EventType.Drive)
+                {
+                    double timeGap = (next.StartTime - current.EndTime).TotalMinutes;
+                    double distanceGap = HaversineDistance(
+                        new LocationPoint { Latitude = current.EndLatitude ?? 0, Longitude = current.EndLongitude ?? 0 },
+                        new LocationPoint { Latitude = next.StartLatitude ?? 0, Longitude = next.StartLongitude ?? 0 }
+                    ) * 1000;
+
+                    if (timeGap < 5 && distanceGap < 200)
+                    {
+                        _logger.LogInformation($"🔁 MERGING consecutive drives: {timeGap:F1} min apart, {distanceGap:F1} m distance");
+
+                        // Extend the current event to cover the next one
+                        current.EndTime = next.EndTime;
+                        current.EndLatitude = next.EndLatitude;
+                        current.EndLongitude = next.EndLongitude;
+                        current.DistanceKm = (current.DistanceKm ?? 0) + (next.DistanceKm ?? 0);
+                        current.DurationMinutes += next.DurationMinutes;
+
+                        // Merge route paths (if both have valid JSON arrays)
+                        try
+                        {
+                            var coordsA = string.IsNullOrWhiteSpace(current.RoutePathJson)
+                                ? new List<double[]>()
+                                : JsonSerializer.Deserialize<List<double[]>>(current.RoutePathJson) ?? new();
+
+                            var coordsB = string.IsNullOrWhiteSpace(next.RoutePathJson)
+                                ? new List<double[]>()
+                                : JsonSerializer.Deserialize<List<double[]>>(next.RoutePathJson) ?? new();
+
+                            // Append B’s coordinates (excluding duplicates)
+                            if (coordsB.Count > 0)
+                            {
+                                if (coordsA.Count > 0 &&
+                                    coordsA.Last()[0] == coordsB.First()[0] &&
+                                    coordsA.Last()[1] == coordsB.First()[1])
+                                    coordsB.RemoveAt(0);
+
+                                coordsA.AddRange(coordsB);
+                                current.RoutePathJson = JsonSerializer.Serialize(coordsA);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning($"⚠️ Route merge failed: {ex.Message}");
+                        }
+
+                        // Remove the merged drive
+                        events.RemoveAt(i + 1);
+                        i--; // re-evaluate at same index
+                    }
+                }
+            }
+
+
 
             _logger.LogInformation($"✅ Total events detected for Engineer {engineerId}: {events.Count}");
             return events;

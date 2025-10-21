@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.SignalR;
 using EcsFeMappingApi.Services;
+using System.Text.Json;
     
 namespace EcsFeMappingApi.Controllers
 {
@@ -24,7 +25,7 @@ namespace EcsFeMappingApi.Controllers
             _hubContext = hubContext;
         }
 
-        
+
 
         // GET: api/FieldEngineers
         [HttpGet]
@@ -109,6 +110,20 @@ namespace EcsFeMappingApi.Controllers
 
             fe.CurrentLatitude = dto.Latitude;
             fe.CurrentLongitude = dto.Longitude;
+
+            // 🧭 Reverse geocode the current location to human-readable address
+            var address = await ReverseGeocodeAsync(dto.Latitude, dto.Longitude);
+            fe.CurrentAddress = address;
+
+            // Only set TimeIn if it's not yet set (clocked in)
+            if (!fe.TimeIn.HasValue)
+            {
+                fe.TimeIn = DateTime.UtcNow;
+            }
+
+            fe.UpdatedAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
+
             if (dto.IsAvailable.HasValue)
             {
                 fe.IsAvailable = dto.IsAvailable.Value;
@@ -202,74 +217,108 @@ namespace EcsFeMappingApi.Controllers
             return Ok(activities);
         }
 
-        
+
 
         [HttpPost("loginsync")]
-public async Task<ActionResult<FieldEngineer>> LoginSync([FromBody] LoginSyncRequest request)
-{
-    try
-    {
-        // Find the Field Engineer using UserId from external API
-        var fieldEngineer = await _context.FieldEngineers
-            .FirstOrDefaultAsync(fe => fe.Id == request.UserId);
-
-        if (fieldEngineer == null)
+        public async Task<ActionResult<FieldEngineer>> LoginSync([FromBody] LoginSyncRequest request)
         {
-            // User doesn't exist in our system, so create them with data from boss's API
-            fieldEngineer = new FieldEngineer
+            try
             {
-                Id = request.UserId,
-                Name = $"{request.FirstName} {request.LastName}",
-                FirstName = request.FirstName,
-                LastName = request.LastName,
-                FcmToken = request.FcmToken,
-                CurrentLatitude = 0.0,  // Default location
-                CurrentLongitude = 0.0, // Default location
-                IsActive = true,
-                IsAvailable = true,
-                Status = "Online",
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
-            };
+                // Find the Field Engineer using UserId from external API
+                var fieldEngineer = await _context.FieldEngineers
+                    .FirstOrDefaultAsync(fe => fe.Id == request.UserId);
 
-            _context.FieldEngineers.Add(fieldEngineer);
-            Console.WriteLine($"Creating new field engineer from external API: {fieldEngineer.Name} (ID: {fieldEngineer.Id})");
+                if (fieldEngineer == null)
+                {
+                    // User doesn't exist in our system, so create them with data from boss's API
+                    fieldEngineer = new FieldEngineer
+                    {
+                        Id = request.UserId,
+                        Name = $"{request.FirstName} {request.LastName}",
+                        FirstName = request.FirstName,
+                        LastName = request.LastName,
+                        FcmToken = request.FcmToken,
+                        CurrentLatitude = 0.0,  // Default location
+                        CurrentLongitude = 0.0, // Default location
+                        IsActive = true,
+                        IsAvailable = true,
+                        Status = "Online",
+                        CreatedAt = DateTime.UtcNow,
+                        UpdatedAt = DateTime.UtcNow
+                    };
+
+                    _context.FieldEngineers.Add(fieldEngineer);
+                    Console.WriteLine($"Creating new field engineer from external API: {fieldEngineer.Name} (ID: {fieldEngineer.Id})");
+                }
+                else
+                {
+                    // User exists, update their info and FCM token
+                    fieldEngineer.FirstName = request.FirstName ?? fieldEngineer.FirstName;
+                    fieldEngineer.LastName = request.LastName ?? fieldEngineer.LastName;
+                    fieldEngineer.Name = $"{fieldEngineer.FirstName} {fieldEngineer.LastName}";
+                    fieldEngineer.FcmToken = request.FcmToken;
+                    fieldEngineer.IsAvailable = true; // Make available upon login
+                    fieldEngineer.Status = "Online";
+                    fieldEngineer.UpdatedAt = DateTime.UtcNow;
+
+                    _context.FieldEngineers.Update(fieldEngineer);
+                    Console.WriteLine($"Updating existing field engineer: {fieldEngineer.Name} (ID: {fieldEngineer.Id})");
+                }
+
+                await _context.SaveChangesAsync();
+
+                // Send SignalR notification
+                await _hubContext.Clients.All.SendAsync("ReceiveFieldEngineerUpdate", fieldEngineer);
+
+                // Return the complete, updated profile to the app
+                return Ok(fieldEngineer);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Login sync error: {ex.Message}");
+                return StatusCode(500, $"Login sync failed: {ex.Message}");
+            }
         }
-        else
-        {
-            // User exists, update their info and FCM token
-            fieldEngineer.FirstName = request.FirstName ?? fieldEngineer.FirstName;
-            fieldEngineer.LastName = request.LastName ?? fieldEngineer.LastName;
-            fieldEngineer.Name = $"{fieldEngineer.FirstName} {fieldEngineer.LastName}";
-            fieldEngineer.FcmToken = request.FcmToken;
-            fieldEngineer.IsAvailable = true; // Make available upon login
-            fieldEngineer.Status = "Online";
-            fieldEngineer.UpdatedAt = DateTime.UtcNow;
-
-            _context.FieldEngineers.Update(fieldEngineer);
-            Console.WriteLine($"Updating existing field engineer: {fieldEngineer.Name} (ID: {fieldEngineer.Id})");
-        }
-
-        await _context.SaveChangesAsync();
-
-        // Send SignalR notification
-        await _hubContext.Clients.All.SendAsync("ReceiveFieldEngineerUpdate", fieldEngineer);
-
-        // Return the complete, updated profile to the app
-        return Ok(fieldEngineer);
-    }
-    catch (Exception ex)
-    {
-        Console.WriteLine($"Login sync error: {ex.Message}");
-        return StatusCode(500, $"Login sync failed: {ex.Message}");
-    }
-}
 
         private bool FieldEngineerExists(int id)
         {
             return _context.FieldEngineers.Any(e => e.Id == id);
         }
+
+        private async Task<string> ReverseGeocodeAsync(double lat, double lon)
+        {
+            var http = new HttpClient();
+            var apiKey = "pk.eyJ1IjoiYmFzaWwxLTIzIiwiYSI6ImNtZWFvNW43ZTA0ejQycHBtd3dkMHJ1bnkifQ.Y-IlM-vQAlaGr7pVQnug3Q";
+            var url = $"https://api.mapbox.com/geocoding/v5/mapbox.places/{lon},{lat}.json?access_token={apiKey}&types=address,poi";
+
+            try
+            {
+                var response = await http.GetAsync(url);
+                if (response.IsSuccessStatusCode)
+                {
+                    var json = await response.Content.ReadAsStringAsync();
+                    using var doc = JsonDocument.Parse(json);
+                    var features = doc.RootElement.GetProperty("features");
+                    if (features.GetArrayLength() > 0)
+                    {
+                        var feature = features[0];
+                        return feature.GetProperty("place_name").GetString() ?? "Unknown location";
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Reverse geocode failed: {ex.Message}");
+            }
+
+            return "Unknown location";
+        }
+
     }
+
+    
+    
+    
 
 
 

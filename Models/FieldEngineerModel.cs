@@ -17,6 +17,8 @@ namespace EcsFeMappingApi.Models
         public string Phone { get; set; } = string.Empty;
         public double CurrentLatitude { get; set; }
         public double CurrentLongitude { get; set; }
+        public string? CurrentAddress { get; set; }
+        public DateTime? TimeIn { get; set; }
         public bool IsAvailable { get; set; }
         public bool IsActive { get; set; } = true;  // Add this too
         public string Status { get; set; } = string.Empty;
