@@ -41,7 +41,7 @@ namespace EcsFeMappingApi.Services
         public Task StartAsync(CancellationToken cancellationToken)
         {
             _logger.LogInformation("Activity Processing Service is starting.");
-            _timer = new Timer(DoWork, null, TimeSpan.Zero, TimeSpan.FromMinutes(15));
+            _timer = new Timer(DoWork, null, TimeSpan.Zero, TimeSpan.FromMinutes(2));
             return Task.CompletedTask;
         }
 
@@ -97,122 +97,155 @@ namespace EcsFeMappingApi.Services
         }
 
         private async Task<List<ActivityEvent>> DetectEvents(List<LocationPoint> locationPoints, int engineerId, AppDbContext dbContext)
+{
+    var events = new List<ActivityEvent>();
+    if (locationPoints.Count == 0) return events;
+
+    // 🔧 TEMPORARILY LOWERED THRESHOLDS for easier testing
+    const double MOVE_SPEED_THRESHOLD_KMH = 4.0;   // was 8.0
+    const double STOP_SPEED_THRESHOLD_KMH = 1.0;   // was 3.0
+    const double MIN_TRIP_DISTANCE_KM = 0.05;      // was 0.1 (50 meters)
+    const int MIN_STOP_DURATION_MIN = 2;           // was 5
+    const int MIN_TRIP_DURATION_MIN = 1;
+    const double STAY_RADIUS_METERS = 50;          // was 100
+
+    var currentDrivePoints = new List<LocationPoint>();
+    ActivityEvent? lastStopEvent = null;
+    bool isMoving = false;
+
+    // ✅ Iterate through all points chronologically
+    for (int i = 0; i < locationPoints.Count; i++)
+    {
+        var point = locationPoints[i];
+
+        // ✅ Auto-compute speed if missing or 0
+        double speedKmh;
+        if (point.Speed == null || point.Speed == 0)
         {
-            // Life360-style trip grouping logic
-            var events = new List<ActivityEvent>();
-            if (locationPoints.Count == 0) return events;
-
-            const double MOVE_SPEED_THRESHOLD_KMH = 8.0;
-            const double STOP_SPEED_THRESHOLD_KMH = 3.0;
-            const double MIN_TRIP_DISTANCE_KM = 0.1;
-            const int MIN_STOP_DURATION_MIN = 5;
-            const int MIN_TRIP_DURATION_MIN = 1;
-            const double STAY_RADIUS_METERS = 100;
-
-            var currentDrivePoints = new List<LocationPoint>();
-            LocationPoint? lastStopPoint = null;
-            ActivityEvent? lastStopEvent = null;
-            bool isMoving = false;
-
-            foreach (var point in locationPoints)
+            if (i > 0)
             {
-                double speedKmh = (point.Speed ?? 0) * 3.6;
+                var prev = locationPoints[i - 1];
+                var distKm = HaversineDistance(prev, point);
+                var timeHr = (point.Timestamp - prev.Timestamp).TotalHours;
+                speedKmh = (timeHr > 0 ? distKm / timeHr : 0);
+            }
+            else
+            {
+                speedKmh = 0;
+            }
+        }
+        else
+        {
+            speedKmh = (point.Speed ?? 0) * 3.6;
+        }
 
-                if (speedKmh > MOVE_SPEED_THRESHOLD_KMH)
+        // 🧠 Debug logging for visibility
+        _logger.LogInformation($"[{engineerId}] Point: {point.Timestamp:HH:mm:ss} | Speed={speedKmh:F1} km/h | Lat={point.Latitude:F5}, Lon={point.Longitude:F5}");
+
+        if (speedKmh > MOVE_SPEED_THRESHOLD_KMH)
+        {
+            // 🚗 Moving
+            isMoving = true;
+            currentDrivePoints.Add(point);
+        }
+        else
+        {
+            // 🅿️ Stopped or slow
+            if (isMoving && currentDrivePoints.Count > 1)
+            {
+                double tripDistance = 0;
+                for (int j = 0; j < currentDrivePoints.Count - 1; j++)
+                    tripDistance += HaversineDistance(currentDrivePoints[j], currentDrivePoints[j + 1]);
+
+                var tripDuration = (currentDrivePoints.Last().Timestamp - currentDrivePoints.First().Timestamp).TotalMinutes;
+
+                if (tripDistance >= MIN_TRIP_DISTANCE_KM && tripDuration >= MIN_TRIP_DURATION_MIN)
                 {
-                    // Field Engineer is moving
-                    isMoving = true;
-                    currentDrivePoints.Add(point);
+                    var driveEvent = await CreateDriveEvent(currentDrivePoints, engineerId, dbContext);
+                    if (driveEvent != null)
+                    {
+                        _logger.LogInformation($"🚗 DRIVE DETECTED: {tripDistance:F2} km, {tripDuration:F1} min");
+                        events.Add(driveEvent);
+                    }
+                }
+
+                currentDrivePoints.Clear();
+            }
+
+            isMoving = false;
+
+            // 🕓 Detect or extend stop event
+            if (lastStopEvent == null)
+            {
+                lastStopEvent = new ActivityEvent
+                {
+                    FieldEngineerId = engineerId,
+                    Type = EventType.Stop,
+                    StartTime = point.Timestamp,
+                    StartLatitude = point.Latitude,
+                    StartLongitude = point.Longitude,
+                    EndTime = point.Timestamp
+                };
+            }
+            else
+            {
+                var distFromLast = HaversineDistance(
+                    new LocationPoint { Latitude = point.Latitude, Longitude = point.Longitude },
+                    new LocationPoint { Latitude = lastStopEvent.StartLatitude ?? 0, Longitude = lastStopEvent.StartLongitude ?? 0 }
+                ) * 1000.0; // meters
+
+                if (distFromLast <= STAY_RADIUS_METERS)
+                {
+                    lastStopEvent.EndTime = point.Timestamp;
                 }
                 else
                 {
-                    // Field Engineer is stopped or moving slowly
-                    if (isMoving && currentDrivePoints.Count > 1)
+                    var stayDuration = (lastStopEvent.EndTime - lastStopEvent.StartTime).TotalMinutes;
+                    if (stayDuration >= MIN_STOP_DURATION_MIN)
                     {
-                        double tripDistance = 0;
-                        for (int i = 0; i < currentDrivePoints.Count - 1; i++)
-                            tripDistance += HaversineDistance(currentDrivePoints[i], currentDrivePoints[i + 1]);
-
-                        var tripDuration = (currentDrivePoints.Last().Timestamp - currentDrivePoints.First().Timestamp).TotalMinutes;
-
-                        if (tripDistance >= MIN_TRIP_DISTANCE_KM && tripDuration >= MIN_TRIP_DURATION_MIN)
-                        {
-                            var driveEvent = await CreateDriveEvent(currentDrivePoints, engineerId, dbContext);
-                            if (driveEvent != null)
-                                events.Add(driveEvent);
-                        }
-
-                        currentDrivePoints.Clear();
+                        lastStopEvent.DurationMinutes = (int)stayDuration;
+                        _logger.LogInformation($"⏸ STOP DETECTED: {stayDuration:F1} min stay within {STAY_RADIUS_METERS}m");
+                        events.Add(lastStopEvent);
                     }
 
-                    isMoving = false;
-
-                    // Detect or extend stop event
-                    if (lastStopEvent == null)
+                    lastStopEvent = new ActivityEvent
                     {
-                        lastStopPoint = point;
-                        lastStopEvent = new ActivityEvent
-                        {
-                            FieldEngineerId = engineerId,
-                            Type = EventType.Stop,
-                            StartTime = point.Timestamp,
-                            StartLatitude = point.Latitude,
-                            StartLongitude = point.Longitude,
-                            EndTime = point.Timestamp
-                        };
-                    }
-                    else
-                    {
-                        var distFromLast = HaversineDistance(
-                            new LocationPoint { Latitude = point.Latitude, Longitude = point.Longitude },
-                            new LocationPoint { Latitude = lastStopEvent.StartLatitude ?? 0, Longitude = lastStopEvent.StartLongitude ?? 0 }
-                        ) * 1000.0; // meters
-
-                        if (distFromLast <= STAY_RADIUS_METERS)
-                        {
-                            lastStopEvent.EndTime = point.Timestamp;
-                        }
-                        else
-                        {
-                            var stayDuration = (lastStopEvent.EndTime - lastStopEvent.StartTime).TotalMinutes;
-                            if (stayDuration >= MIN_STOP_DURATION_MIN)
-                            {
-                                lastStopEvent.DurationMinutes = (int)stayDuration;
-                                events.Add(lastStopEvent);
-                            }
-
-                            lastStopEvent = new ActivityEvent
-                            {
-                                FieldEngineerId = engineerId,
-                                Type = EventType.Stop,
-                                StartTime = point.Timestamp,
-                                StartLatitude = point.Latitude,
-                                StartLongitude = point.Longitude,
-                                EndTime = point.Timestamp
-                            };
-                        }
-                    }
+                        FieldEngineerId = engineerId,
+                        Type = EventType.Stop,
+                        StartTime = point.Timestamp,
+                        StartLatitude = point.Latitude,
+                        StartLongitude = point.Longitude,
+                        EndTime = point.Timestamp
+                    };
                 }
             }
-
-            if (isMoving && currentDrivePoints.Count > 1)
-            {
-                var driveEvent = await CreateDriveEvent(currentDrivePoints, engineerId, dbContext);
-                if (driveEvent != null)
-                    events.Add(driveEvent);
-            }
-            else if (lastStopEvent != null)
-            {
-                var stayDuration = (lastStopEvent.EndTime - lastStopEvent.StartTime).TotalMinutes;
-                if (stayDuration >= MIN_STOP_DURATION_MIN)
-                {
-                    lastStopEvent.DurationMinutes = (int)stayDuration;
-                    events.Add(lastStopEvent);
-                }
-            }
-
-            return events;
         }
+    }
+
+    // ✅ Finalize remaining drive or stop
+    if (isMoving && currentDrivePoints.Count > 1)
+    {
+        var driveEvent = await CreateDriveEvent(currentDrivePoints, engineerId, dbContext);
+        if (driveEvent != null)
+        {
+            _logger.LogInformation($"🚗 FINAL DRIVE DETECTED: {currentDrivePoints.Count} pts");
+            events.Add(driveEvent);
+        }
+    }
+    else if (lastStopEvent != null)
+    {
+        var stayDuration = (lastStopEvent.EndTime - lastStopEvent.StartTime).TotalMinutes;
+        if (stayDuration >= MIN_STOP_DURATION_MIN)
+        {
+            lastStopEvent.DurationMinutes = (int)stayDuration;
+            _logger.LogInformation($"🛑 FINAL STOP DETECTED: {stayDuration:F1} min");
+            events.Add(lastStopEvent);
+        }
+    }
+
+    _logger.LogInformation($"✅ Total events detected for Engineer {engineerId}: {events.Count}");
+    return events;
+}
 
 
         private async Task<ActivityEvent?> CreateStopEvent(List<LocationPoint> stopPoints, int engineerId, AppDbContext dbContext)
