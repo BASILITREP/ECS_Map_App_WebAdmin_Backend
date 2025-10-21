@@ -233,15 +233,18 @@ namespace EcsFeMappingApi.Services
         }
     }
     else if (lastStopEvent != null)
+{
+    var stayDuration = (lastStopEvent.EndTime - lastStopEvent.StartTime).TotalMinutes;
+    if (stayDuration >= MIN_STOP_DURATION_MIN)
     {
-        var stayDuration = (lastStopEvent.EndTime - lastStopEvent.StartTime).TotalMinutes;
-        if (stayDuration >= MIN_STOP_DURATION_MIN)
-        {
-            lastStopEvent.DurationMinutes = (int)stayDuration;
-            _logger.LogInformation($"🛑 FINAL STOP DETECTED: {stayDuration:F1} min");
-            events.Add(lastStopEvent);
-        }
+        lastStopEvent.DurationMinutes = (int)stayDuration;
+
+        // ✅ Always save ongoing stop if duration threshold met
+        _logger.LogInformation($"🏠 ONGOING STOP DETECTED: {stayDuration:F1} min at ~{lastStopEvent.StartLatitude:F5},{lastStopEvent.StartLongitude:F5}");
+        events.Add(lastStopEvent);
     }
+}
+
 
     _logger.LogInformation($"✅ Total events detected for Engineer {engineerId}: {events.Count}");
     return events;
