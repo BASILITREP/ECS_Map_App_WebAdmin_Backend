@@ -140,6 +140,13 @@ app.MapGet("/", () => new
     database = "Railway MySQL"
 });
 
+app.MapPost("/trigger-activity", async (ActivityProcessingService svc) =>
+{
+    await svc.TriggerProcessingAsync();
+    return Results.Ok(new { message = "Manual activity processing triggered!" });
+});
+
+
 // Test endpoint for CORS
 app.MapGet("/api/test", () => new {
     message = "CORS test endpoint working!",

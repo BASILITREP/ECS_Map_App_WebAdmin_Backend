@@ -33,36 +33,65 @@ namespace EcsFeMappingApi.Controllers
         }
 
         // POST: api/Location
-        [HttpPost]
-        public async Task<IActionResult> PostLocationPoints(List<LocationPoint> points)
-        {
-            if (points == null || !points.Any())
-            {
-                return BadRequest("No location points provided.");
-            }
+        // [HttpPost]
+        // public async Task<IActionResult> PostLocationPoints(List<LocationPoint> points)
+        // {
+        //     if (points == null || !points.Any())
+        //     {
+        //         return BadRequest("No location points provided.");
+        //     }
 
-            try 
+        //     try 
+        //     {
+        //         // Save location points to database
+        //         _context.LocationPoints.AddRange(points);
+        //         await _context.SaveChangesAsync();
+                
+        //         Console.WriteLine($"✅ Saved {points.Count} location points to database");
+
+        //         // --- ADD THIS LINE TO TRIGGER PROCESSING ---
+        //         await _activityProcessor.TriggerProcessingAsync();
+
+        //         return Ok(new { 
+        //             message = "Location points saved and processed successfully", 
+        //             count = points.Count 
+        //         });
+        //     }
+        //     catch (Exception ex)
+        //     {
+        //         Console.WriteLine($"❌ Error saving location points: {ex.Message}");
+        //         Console.WriteLine($"❌ Stack trace: {ex.StackTrace}");
+        //         return StatusCode(500, $"Error processing location points: {ex.Message}");
+        //     }
+        // }
+
+        [HttpPost]
+            public async Task<IActionResult> PostLocationPoints(List<LocationPoint> points)
             {
-                // Save location points to database
+                if (points == null || !points.Any())
+                    return BadRequest("No location points provided.");
+
+                // ✅ Normalize incoming points
+                foreach (var p in points)
+                {
+                    if (p.FieldEngineerId <= 0)
+                        return BadRequest("Each point must include a valid FieldEngineerId.");
+
+                    if (p.Timestamp == default)
+                        p.Timestamp = DateTime.UtcNow;
+
+                    p.IsProcessed = false; // ensure new points are actually picked up
+                }
+
                 _context.LocationPoints.AddRange(points);
                 await _context.SaveChangesAsync();
-                
                 Console.WriteLine($"✅ Saved {points.Count} location points to database");
 
-                // --- ADD THIS LINE TO TRIGGER PROCESSING ---
+                // Trigger processing after save
                 await _activityProcessor.TriggerProcessingAsync();
 
-                return Ok(new { 
-                    message = "Location points saved and processed successfully", 
-                    count = points.Count 
-                });
+                return Ok(new { message = "Location points saved and processed successfully", count = points.Count });
             }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"❌ Error saving location points: {ex.Message}");
-                Console.WriteLine($"❌ Stack trace: {ex.StackTrace}");
-                return StatusCode(500, $"Error processing location points: {ex.Message}");
-            }
-        }
+
     }
 }
