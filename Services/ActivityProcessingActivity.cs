@@ -203,10 +203,10 @@ namespace EcsFeMappingApi.Services
                         {
                             FieldEngineerId = engineerId,
                             Type = EventType.Stop,
-                            StartTime = point.Timestamp,
+                            StartTime = point.Timestamp.ToUniversalTime(),
                             StartLatitude = point.Latitude,
                             StartLongitude = point.Longitude,
-                            EndTime = point.Timestamp
+                            EndTime = point.Timestamp.ToUniversalTime(),
                         };
                     }
                     else
@@ -353,8 +353,8 @@ namespace EcsFeMappingApi.Services
             {
                 FieldEngineerId = engineerId,
                 Type = EventType.Stop,
-                StartTime = firstPoint.Timestamp,
-                EndTime = lastPoint.Timestamp,
+                StartTime = firstPoint.Timestamp.ToUniversalTime(),
+                EndTime = lastPoint.Timestamp.ToUniversalTime(),
                 DurationMinutes = (int)duration,
                 Address = address,
                 LocationName = locationName,
