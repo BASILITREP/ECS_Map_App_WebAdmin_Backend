@@ -42,7 +42,7 @@ namespace EcsFeMappingApi.Services
         public Task StartAsync(CancellationToken cancellationToken)
         {
             _logger.LogInformation("Activity Processing Service is starting.");
-            _timer = new Timer(DoWork, null, TimeSpan.Zero, TimeSpan.FromMinutes(2));
+            _timer = new Timer(DoWork, null, TimeSpan.Zero, TimeSpan.FromSeconds(10));
             return Task.CompletedTask;
         }
 
