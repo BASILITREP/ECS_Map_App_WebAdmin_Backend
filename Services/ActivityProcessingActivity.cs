@@ -124,12 +124,12 @@ namespace EcsFeMappingApi.Services
             if (locationPoints.Count == 0) return events;
 
             // 🔧 TEMPORARILY LOWERED THRESHOLDS for easier testing
-            const double MOVE_SPEED_THRESHOLD_KMH = 4.0;   // was 8.0
-            const double STOP_SPEED_THRESHOLD_KMH = 1.0;   // was 3.0
-            const double MIN_TRIP_DISTANCE_KM = 0.05;      // was 0.1 (50 meters)
-            const int MIN_STOP_DURATION_MIN = 2;           // was 5
+            const double MOVE_SPEED_THRESHOLD_KMH = 8.0;   // was 8.0
+            const double STOP_SPEED_THRESHOLD_KMH = 3.0;   // was 3.0
+            const double MIN_TRIP_DISTANCE_KM = 0.1;      // was 0.1 (50 meters)
+            const int MIN_STOP_DURATION_MIN = 5;           // was 5
             const int MIN_TRIP_DURATION_MIN = 1;
-            const double STAY_RADIUS_METERS = 50;          // was 100
+            const double STAY_RADIUS_METERS = 100;          // was 100
 
             var currentDrivePoints = new List<LocationPoint>();
             ActivityEvent? lastStopEvent = null;

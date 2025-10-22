@@ -314,6 +314,73 @@ namespace EcsFeMappingApi.Controllers
             return "Unknown location";
         }
 
+
+        // POST: api/FieldEngineer/{id}/clockin
+        [HttpPost("{id}/clockin")]
+        public async Task<IActionResult> ClockIn(int id)
+        {
+            var engineer = await _context.FieldEngineers.FindAsync(id);
+            if (engineer == null) return NotFound("Engineer not found");
+
+            // Prevent double Time In without Time Out
+            var existingLog = await _context.AttendanceLogs
+                .Where(l => l.FieldEngineerId == id && l.TimeOut == null)
+                .FirstOrDefaultAsync();
+
+            if (existingLog != null)
+                return BadRequest("Already clocked in, please clock out first.");
+
+            var log = new AttendanceLogModel
+            {
+                FieldEngineerId = id,
+                TimeIn = DateTime.UtcNow,
+                Location = engineer.CurrentAddress
+            };
+
+            _context.AttendanceLogs.Add(log);
+            engineer.TimeIn = log.TimeIn; // optional mirror field
+            engineer.Status = "Clocked In";
+            await _context.SaveChangesAsync();
+
+            return Ok(new { message = "Clocked in successfully", log });
+        }
+
+        // POST: api/FieldEngineer/{id}/clockout
+        [HttpPost("{id}/clockout")]
+        public async Task<IActionResult> ClockOut(int id)
+        {
+            var engineer = await _context.FieldEngineers.FindAsync(id);
+            if (engineer == null) return NotFound("Engineer not found");
+
+            var log = await _context.AttendanceLogs
+                .Where(l => l.FieldEngineerId == id && l.TimeOut == null)
+                .OrderByDescending(l => l.TimeIn)
+                .FirstOrDefaultAsync();
+
+            if (log == null)
+                return BadRequest("No active Time In found for this engineer.");
+
+            log.TimeOut = DateTime.UtcNow;
+            engineer.Status = "Clocked Out";
+
+            await _context.SaveChangesAsync();
+
+            return Ok(new { message = "Clocked out successfully", log });
+        }
+
+        // GET: api/FieldEngineer/{id}/attendance
+        [HttpGet("{id}/attendance")]
+        public async Task<IActionResult> GetAttendanceLogs(int id)
+        {
+            var logs = await _context.AttendanceLogs
+                .Where(l => l.FieldEngineerId == id)
+                .OrderByDescending(l => l.TimeIn)
+                .ToListAsync();
+
+            return Ok(logs);
+        }
+
+
     }
 
     

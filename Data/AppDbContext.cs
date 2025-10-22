@@ -15,6 +15,7 @@ namespace EcsFeMappingApi.Data
         public DbSet<UserModel> Users { get; set; } 
         public DbSet<ActivityEvent> ActivityEvents { get; set; }
         public DbSet<LocationPoint> LocationPoints { get; set; }
+        public DbSet<AttendanceLogModel> AttendanceLogs { get; set; }
         
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -33,6 +34,7 @@ namespace EcsFeMappingApi.Data
                 .WithMany()
                 .HasForeignKey(sr => sr.FieldEngineerId)
                 .OnDelete(DeleteBehavior.SetNull);
+                
 
 
             modelBuilder.Entity<UserModel>().HasData(
