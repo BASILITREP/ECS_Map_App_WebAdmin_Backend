@@ -12,6 +12,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using Microsoft.AspNetCore.StaticAssets;
+using Microsoft.AspNetCore.SignalR;
 
 namespace EcsFeMappingApi.Services
 {
@@ -114,6 +115,26 @@ namespace EcsFeMappingApi.Services
 
                     await dbContext.SaveChangesAsync();
                     _logger.LogInformation($"Finished processing for Engineer ID: {engineerId}. Marked {marked} points as processed, kept {kept} recent points for accumulation.");
+
+                    // ✅ NEW: Broadcast updated coordinates to web admin
+                    try
+                    {
+                        var engineer = await dbContext.FieldEngineers.FindAsync(engineerId);
+                        if (engineer != null)
+                        {
+                            using (var innerScope = _serviceProvider.CreateScope())
+                            {
+                                var hubContext = innerScope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<EcsFeMappingApi.Services.NotificationHub>>();
+                                await hubContext.Clients.All.SendAsync("ReceiveFieldEngineerUpdate", engineer);
+                                _logger.LogInformation($"📡 Broadcasted live update for FE #{engineer.Id}: {engineer.CurrentLatitude},{engineer.CurrentLongitude}");
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError($"❌ Failed to broadcast SignalR update: {ex.Message}");
+                    }
+
                 }
             }
         }
