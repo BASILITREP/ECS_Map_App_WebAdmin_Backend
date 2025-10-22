@@ -189,6 +189,7 @@ namespace EcsFeMappingApi.Controllers
                 await _context.SaveChangesAsync();
 
                 // Notify all clients about the update
+                Console.WriteLine("📡 Sending SignalR broadcast for FE update...");
                 await _hubContext.Clients.All.SendAsync("ReceiveFieldEngineerUpdate", engineer);
 
                 return Ok();
@@ -314,7 +315,6 @@ namespace EcsFeMappingApi.Controllers
             return "Unknown location";
         }
 
-
         // POST: api/FieldEngineer/{id}/clockin
         [HttpPost("{id}/clockin")]
         public async Task<IActionResult> ClockIn(int id)
@@ -379,7 +379,6 @@ namespace EcsFeMappingApi.Controllers
 
             return Ok(logs);
         }
-
 
     }
 

@@ -12,7 +12,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace EcsFeMappingApi.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20251022053948_AddAttendanceLogs")]
+    [Migration("20251022065505_AddAttendanceLogs")]
     partial class AddAttendanceLogs
     {
         /// <inheritdoc />
@@ -90,6 +90,31 @@ namespace EcsFeMappingApi.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("ActivityEvents");
+                });
+
+            modelBuilder.Entity("EcsFeMappingApi.Models.AttendanceLogModel", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("FieldEngineerId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Location")
+                        .HasColumnType("longtext");
+
+                    b.Property<DateTime>("TimeIn")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<DateTime?>("TimeOut")
+                        .HasColumnType("datetime(6)");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("AttendanceLogs");
                 });
 
             modelBuilder.Entity("EcsFeMappingApi.Models.Branch", b =>
@@ -323,8 +348,8 @@ namespace EcsFeMappingApi.Migrations
                         new
                         {
                             Id = 1,
-                            CreatedAt = new DateTime(2025, 10, 22, 5, 39, 48, 207, DateTimeKind.Utc).AddTicks(8841),
-                            PasswordHash = "$2a$11$pNiFJg6atcSOVr5upJlsZOxGdl1jOBYPlmlQr/U8Nd4rwb.dxv7du",
+                            CreatedAt = new DateTime(2025, 10, 22, 6, 55, 5, 187, DateTimeKind.Utc).AddTicks(9296),
+                            PasswordHash = "$2a$11$XDMKwSmPJe0VATtKJCrx4.J84oYemE2WnvFELpvEOPwSXwqQtqrhq",
                             Role = "Admin",
                             Username = "admin"
                         });
