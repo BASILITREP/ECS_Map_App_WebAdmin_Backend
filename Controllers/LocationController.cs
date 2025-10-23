@@ -85,10 +85,19 @@ namespace EcsFeMappingApi.Controllers
 
                 _context.LocationPoints.AddRange(points);
                 await _context.SaveChangesAsync();
-                Console.WriteLine($"✅ Saved {points.Count} location points to database");
+            Console.WriteLine($"✅ Saved {points.Count} location points to database");
 
                 // Trigger processing after save
-                await _activityProcessor.TriggerProcessingAsync();
+                //await _activityProcessor.TriggerProcessingAsync();
+                try
+                {
+                    await _activityProcessor.TriggerProcessingAsync();
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"⚠️ ActivityProcessor failed: {ex.Message}");
+                }
+
 
                 return Ok(new { message = "Location points saved and processed successfully", count = points.Count });
             }

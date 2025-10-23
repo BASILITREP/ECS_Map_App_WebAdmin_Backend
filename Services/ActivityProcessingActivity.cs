@@ -354,43 +354,44 @@ namespace EcsFeMappingApi.Services
 
         private async Task<(string LocationName, string Address)> ReverseGeocodeAsync(double lat, double lon, AppDbContext dbContext)
         {
+            if (lat == 0 || lon == 0)
+                return ("Unknown", "Unknown Address");
+
             var httpClient = _httpClientFactory.CreateClient();
-            // TODO: Move API Key to appsettings.json or other configuration provider
-            // Using the API key from your old, working code.
             var apiKey = "pk.eyJ1IjoiYmFzaWwxLTIzIiwiYSI6ImNtZWFvNW43ZTA0ejQycHBtd3dkMHJ1bnkifQ.Y-IlM-vQAlaGr7pVQnug3Q";
             var url = $"https://api.mapbox.com/geocoding/v5/mapbox.places/{lon},{lat}.json?types=poi,address&access_token={apiKey}";
 
             try
             {
                 var response = await httpClient.GetAsync(url);
-                if (response.IsSuccessStatusCode)
+                if (!response.IsSuccessStatusCode)
                 {
-                    var jsonString = await response.Content.ReadAsStringAsync();
-                    using (var jsonDoc = JsonDocument.Parse(jsonString))
-                    {
-                        var features = jsonDoc.RootElement.GetProperty("features");
-                        if (features.GetArrayLength() > 0)
-                        {
-                            var feature = features[0];
-                            // Using the logic from your old code to get location name and address
-                            var locationName = feature.TryGetProperty("text", out var textProp) ? textProp.GetString() ?? "Unknown" : "Unknown";
-                            var address = feature.TryGetProperty("place_name", out var placeNameProp) ? placeNameProp.GetString() ?? "Unknown Address" : "Unknown Address";
+                    _logger.LogWarning($"Reverse geocoding failed with status {response.StatusCode} for {lat},{lon}");
+                    return ("Unknown", "Unknown Address");
+                }
 
-                            return (locationName, address);
-                        }
-                    }
-                }
-                else
-                {
-                    _logger.LogWarning($"Reverse geocoding failed with status code {response.StatusCode} for {lat},{lon}");
-                }
+                var jsonString = await response.Content.ReadAsStringAsync();
+                using var jsonDoc = JsonDocument.Parse(jsonString);
+
+                if (!jsonDoc.RootElement.TryGetProperty("features", out var features) || features.GetArrayLength() == 0)
+                    return ("Unknown", "Unknown Address");
+
+                var feature = features[0];
+                var locationName = feature.TryGetProperty("text", out var textProp)
+                    ? textProp.GetString() ?? "Unknown"
+                    : "Unknown";
+                var address = feature.TryGetProperty("place_name", out var placeNameProp)
+                    ? placeNameProp.GetString() ?? "Unknown Address"
+                    : "Unknown Address";
+
+                return (locationName, address);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error during reverse geocoding.");
+                _logger.LogError(ex, $"🔥 Reverse geocoding crashed for {lat},{lon}");
+                return ("Unknown", "Unknown Address");
             }
-            return ("Unknown", "Unknown Address");
-        }
+}
 
         private double HaversineDistance(LocationPoint p1, LocationPoint p2)
         {
