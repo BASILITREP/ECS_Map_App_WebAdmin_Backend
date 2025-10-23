@@ -162,8 +162,8 @@ namespace EcsFeMappingApi.Services
             if (locationPoints.Count < 2) return events;
 
             const double MOVE_DISTANCE_METERS = 50; // must move >50 m
-            const int STOP_DURATION_MINUTES = 5;    // 5 min stop = Point B (Drive)
-            const int STAY_DURATION_MINUTES = 15;   // 15 min stop = Stay
+            const int STOP_DURATION_MINUTES = 1;    // 5 min stop = Point B (Drive)
+            const int STAY_DURATION_MINUTES = 2;   // 15 min stop = Stay
             const double STAY_RADIUS_METERS = 50;   // within same area
 
             LocationPoint pointA = locationPoints.First(); // Clock-in / start point
