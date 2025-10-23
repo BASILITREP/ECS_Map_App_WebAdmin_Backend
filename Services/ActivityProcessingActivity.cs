@@ -92,68 +92,79 @@ namespace EcsFeMappingApi.Services
                 _logger.LogInformation($"⚙️ Found {engineersWithNewPoints.Count} engineers with unprocessed points.");
 
                 foreach (var engineerId in engineersWithNewPoints)
-                {
-                    _logger.LogInformation($"Processing activities for Engineer ID: {engineerId}");
+{
+    _logger.LogInformation($"⚙️ Processing activities for Engineer ID: {engineerId}");
 
-                    var pointsToProcess = await dbContext.LocationPoints
-                        .Where(p => p.FieldEngineerId == engineerId && !p.IsProcessed)
-                        .OrderBy(p => p.Timestamp)
-                        .ToListAsync();
+    var pointsToProcess = await dbContext.LocationPoints
+        .Where(p => p.FieldEngineerId == engineerId && !p.IsProcessed)
+        .OrderBy(p => p.Timestamp)
+        .ToListAsync();
 
-                    if (!pointsToProcess.Any()) continue;
+    // ✅ Skip if not enough data points for analysis
+    if (pointsToProcess.Count < 3)
+    {
+        _logger.LogInformation($"⏸️ Skipping FE #{engineerId}: only {pointsToProcess.Count} unprocessed points (need ≥3).");
+        continue;
+    }
 
-                    var newEvents = await DetectEvents(pointsToProcess, engineerId, dbContext);
+    _logger.LogInformation($"🔍 Found {pointsToProcess.Count} unprocessed points for FE #{engineerId}.");
 
-                    if (newEvents.Any())
-                    {
-                        await dbContext.ActivityEvents.AddRangeAsync(newEvents);
-                        _logger.LogInformation($"Adding {newEvents.Count} new events for Engineer ID: {engineerId}.");
-                    }
+    var newEvents = await DetectEvents(pointsToProcess, engineerId, dbContext);
 
-                    // ✅ Leave a trailing window unprocessed so stops/drives can accumulate across runs
-                    // Use at least MIN_STOP_DURATION_MIN as window; keep newest points so next run can extend the stop/drive
-                    var nowUtc = DateTime.UtcNow;
-                    var windowMinutes = Math.Max(2, 5); // keep 5 minutes (or your MIN_STOP_DURATION_MIN)
-                    var cutoff = nowUtc.AddMinutes(-windowMinutes);
+    if (newEvents.Any())
+    {
+        await dbContext.ActivityEvents.AddRangeAsync(newEvents);
+        _logger.LogInformation($"🆕 Added {newEvents.Count} new events for FE #{engineerId}.");
+    }
+    else
+    {
+        _logger.LogInformation($"📭 No new events detected for FE #{engineerId} (points analyzed: {pointsToProcess.Count}).");
+    }
 
-                    int kept = 0, marked = 0;
-                    foreach (var p in pointsToProcess)
-                    {
-                        if (p.Timestamp <= cutoff)
-                        {
-                            p.IsProcessed = true;
-                            marked++;
-                        }
-                        else
-                        {
-                            // keep recent points unprocessed
-                            kept++;
-                        }
-                    }
+    // ✅ Leave a trailing window unprocessed so stops/drives can accumulate
+    var nowUtc = DateTime.UtcNow;
+    var windowMinutes = 5; // Keep last 5 minutes unprocessed for continuity
+    var cutoff = nowUtc.AddMinutes(-windowMinutes);
 
-                    await dbContext.SaveChangesAsync();
-                    _logger.LogInformation($"Finished processing for Engineer ID: {engineerId}. Marked {marked} points as processed, kept {kept} recent points for accumulation.");
+    int kept = 0, marked = 0;
+    foreach (var p in pointsToProcess)
+    {
+        if (p.Timestamp <= cutoff)
+        {
+            p.IsProcessed = true;
+            marked++;
+        }
+        else
+        {
+            kept++;
+        }
+    }
 
-                    // ✅ NEW: Broadcast updated coordinates to web admin
-                    try
-                    {
-                        var engineer = await dbContext.FieldEngineers.FindAsync(engineerId);
-                        if (engineer != null)
-                        {
-                            using (var innerScope = _serviceProvider.CreateScope())
-                            {
-                                var hubContext = innerScope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<EcsFeMappingApi.Services.NotificationHub>>();
-                                await hubContext.Clients.All.SendAsync("ReceiveFieldEngineerUpdate", engineer);
-                                _logger.LogInformation($"📡 Broadcasted live update for FE #{engineer.Id}: {engineer.CurrentLatitude},{engineer.CurrentLongitude}");
-                            }
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError($"❌ Failed to broadcast SignalR update: {ex.Message}");
-                    }
+    await dbContext.SaveChangesAsync();
+    _logger.LogInformation($"✅ Finished FE #{engineerId}: marked {marked}, kept {kept} recent points for next cycle.");
 
-                }
+    // ✅ Broadcast updated coordinates to web admin
+    try
+    {
+        var engineer = await dbContext.FieldEngineers.FindAsync(engineerId);
+        if (engineer != null)
+        {
+            using (var innerScope = _serviceProvider.CreateScope())
+            {
+                var hubContext = innerScope.ServiceProvider
+                    .GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<EcsFeMappingApi.Services.NotificationHub>>();
+
+                await hubContext.Clients.All.SendAsync("ReceiveFieldEngineerUpdate", engineer);
+                _logger.LogInformation($"📡 Broadcasted live update for FE #{engineer.Id}: {engineer.CurrentLatitude},{engineer.CurrentLongitude}");
+            }
+        }
+    }
+    catch (Exception ex)
+    {
+        _logger.LogError($"❌ SignalR broadcast failed: {ex.Message}");
+    }
+}
+
             }
         }
 
