@@ -86,7 +86,7 @@ namespace EcsFeMappingApi.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("ActivityEvents");
+                    b.ToTable("ActivityEvents", (string)null);
                 });
 
             modelBuilder.Entity("EcsFeMappingApi.Models.AttendanceLogModel", b =>
@@ -111,7 +111,7 @@ namespace EcsFeMappingApi.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("AttendanceLogs");
+                    b.ToTable("AttendanceLogs", (string)null);
                 });
 
             modelBuilder.Entity("EcsFeMappingApi.Models.Branch", b =>
@@ -152,7 +152,7 @@ namespace EcsFeMappingApi.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Branches");
+                    b.ToTable("Branches", (string)null);
                 });
 
             modelBuilder.Entity("EcsFeMappingApi.Models.FieldEngineer", b =>
@@ -219,7 +219,7 @@ namespace EcsFeMappingApi.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("FieldEngineers");
+                    b.ToTable("FieldEngineers", (string)null);
                 });
 
             modelBuilder.Entity("EcsFeMappingApi.Models.LocationPoint", b =>
@@ -250,7 +250,7 @@ namespace EcsFeMappingApi.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("LocationPoints");
+                    b.ToTable("LocationPoints", (string)null);
                 });
 
             modelBuilder.Entity("EcsFeMappingApi.Models.ServiceRequest", b =>
@@ -311,7 +311,7 @@ namespace EcsFeMappingApi.Migrations
 
                     b.HasIndex("FieldEngineerId");
 
-                    b.ToTable("ServiceRequests");
+                    b.ToTable("ServiceRequests", (string)null);
                 });
 
             modelBuilder.Entity("EcsFeMappingApi.Models.UserModel", b =>
@@ -339,7 +339,7 @@ namespace EcsFeMappingApi.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Users");
+                    b.ToTable("Users", (string)null);
 
                     b.HasData(
                         new
