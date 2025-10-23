@@ -36,7 +36,7 @@ builder.Services.AddHttpClient();
 builder.Services.AddScoped<EcsFeMappingApi.Services.NotificationService>();
 builder.Services.AddScoped<EcsFeMappingApi.Services.AuthService>();
 builder.Services.AddScoped<FcmNotificationService>();
-builder.Services.AddSingleton<ActivityProcessingService>();
+builder.Services.AddHostedService<ActivityProcessingService>();
 builder.Services.AddHostedService(provider => provider.GetRequiredService<ActivityProcessingService>());
 
 // Configure MySQL

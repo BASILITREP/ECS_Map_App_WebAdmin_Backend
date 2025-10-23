@@ -48,6 +48,7 @@ namespace EcsFeMappingApi.Services
 
         private void DoWork(object? state)
         {
+            _logger.LogInformation("🕒 DoWork triggered - background service is alive.");
             _logger.LogInformation("Activity Processing Service is running via timer.");
             Task.Run(async () => await ProcessActivities());
         }
