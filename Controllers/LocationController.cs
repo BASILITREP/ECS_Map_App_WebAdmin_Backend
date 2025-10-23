@@ -66,41 +66,63 @@ namespace EcsFeMappingApi.Controllers
         // }
 
         [HttpPost]
-            public async Task<IActionResult> PostLocationPoints(List<LocationPoint> points)
-            {
-                if (points == null || !points.Any())
-                    return BadRequest("No location points provided.");
+public async Task<IActionResult> PostLocationPoints([FromBody] List<LocationPoint> points)
+{
+    try
+    {
+        // 🧱 Validate incoming batch
+        if (points == null || points.Count == 0)
+        {
+            Console.WriteLine("⚠️ Received empty location batch.");
+            return BadRequest("No location points provided.");
+        }
 
-                // ✅ Normalize incoming points
-                foreach (var p in points)
-                {
-                    if (p.FieldEngineerId <= 0)
-                        return BadRequest("Each point must include a valid FieldEngineerId.");
+        var feId = points.FirstOrDefault()?.FieldEngineerId ?? 0;
+        Console.WriteLine($"📦 Received {points.Count} points from FE #{feId}");
 
-                    if (p.Timestamp == default)
-                        p.Timestamp = DateTime.UtcNow;
+        // ✅ Normalize and prepare
+        foreach (var p in points)
+        {
+            if (p.FieldEngineerId <= 0)
+                return BadRequest("Each point must include a valid FieldEngineerId.");
 
-                    p.IsProcessed = false; // ensure new points are actually picked up
-                }
+            if (p.Timestamp == default)
+                p.Timestamp = DateTime.UtcNow;
 
-                _context.LocationPoints.AddRange(points);
-                await _context.SaveChangesAsync();
-            Console.WriteLine($"✅ Saved {points.Count} location points to database");
+            p.IsProcessed = false; // ensure new points are actually picked up
+        }
 
-                // Trigger processing after save
-                //await _activityProcessor.TriggerProcessingAsync();
-                try
-                {
-                    await _activityProcessor.TriggerProcessingAsync();
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"⚠️ ActivityProcessor failed: {ex.Message}");
-                }
+        // 💾 Save points to DB
+        _context.LocationPoints.AddRange(points);
+        await _context.SaveChangesAsync();
+        Console.WriteLine($"✅ Saved {points.Count} location points to database");
 
+        // ⚙️ Trigger processing safely
+        try
+        {
+            await _activityProcessor.TriggerProcessingAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"🔥 TriggerProcessingAsync crashed: {ex.Message}");
+            Console.WriteLine(ex.StackTrace);
+        }
 
-                return Ok(new { message = "Location points saved and processed successfully", count = points.Count });
-            }
+        return Ok(new
+        {
+            message = "Location points saved and processing triggered successfully",
+            count = points.Count
+        });
+    }
+    catch (Exception ex)
+    {
+        // ❌ Top-level crash handling
+        Console.WriteLine($"🔥 /api/Location crashed: {ex.Message}");
+        Console.WriteLine(ex.StackTrace);
+        return StatusCode(500, $"Error processing location points: {ex.Message}");
+    }
+}
+
 
     }
 }
