@@ -158,120 +158,137 @@ namespace EcsFeMappingApi.Services
         }
 
         private async Task<List<ActivityEvent>> DetectEvents(List<LocationPoint> locationPoints, int engineerId, AppDbContext dbContext)
+{
+    _logger.LogInformation($"🧩 DetectEvents() called for FE #{engineerId} with {locationPoints.Count} points.");
+
+    var events = new List<ActivityEvent>();
+    if (locationPoints.Count < 2)
+    {
+        _logger.LogInformation($"🚫 Not enough points for FE #{engineerId} (only {locationPoints.Count}).");
+        return events;
+    }
+
+    const double MOVE_DISTANCE_METERS = 3;   // Lowered for test
+    const int STOP_DURATION_MINUTES = 1;     // Drive trigger (short for test)
+    const int STAY_DURATION_MINUTES = 2;     // Stay trigger (short for test)
+    const double STAY_RADIUS_METERS = 100;   // Looser radius for test
+
+    LocationPoint pointA = locationPoints.First(); 
+    DateTime? stopStartTime = null;
+    LocationPoint? stopStartPoint = null;
+    bool isStopped = false;
+
+    _logger.LogInformation($"🚀 Simple detection for FE #{engineerId} started ({locationPoints.Count} pts)");
+
+    for (int i = 1; i < locationPoints.Count; i++)
+    {
+        var prev = locationPoints[i - 1];
+        var curr = locationPoints[i];
+
+        double distMeters = HaversineDistance(prev, curr) * 1000.0;
+        double speedKmh = (curr.Speed ?? 0) * 3.6;
+
+        _logger.LogInformation($"[{engineerId}] {curr.Timestamp:HH:mm:ss} | {distMeters:F1} m | {speedKmh:F1} km/h");
+
+        // Movement detection
+        if (distMeters > MOVE_DISTANCE_METERS)
         {
-            var events = new List<ActivityEvent>();
-            if (locationPoints.Count < 2) return events;
+            // Reset stop timers if moving
+            stopStartTime = null;
+            stopStartPoint = null;
+            isStopped = false;
+        }
+        else
+        {
+            // Within stay radius → possible stop
+            stopStartTime ??= prev.Timestamp;
+            stopStartPoint ??= prev;
 
-            const double MOVE_DISTANCE_METERS = 3; // must move >50 m
-            const int STOP_DURATION_MINUTES = 1;    // 5 min stop = Point B (Drive)
-            const int STAY_DURATION_MINUTES = 2;   // 15 min stop = Stay
-            const double STAY_RADIUS_METERS = 50;   // within same area
+            var stopDuration = (curr.Timestamp - stopStartTime.Value).TotalMinutes;
 
-            LocationPoint pointA = locationPoints.First(); // Clock-in / start point
-            DateTime? stopStartTime = null;
-            LocationPoint? stopStartPoint = null;
-            bool isStopped = false;
+            // 🧱 Debug how long we've been stopped
+            _logger.LogInformation($"[{engineerId}] Stop duration so far: {stopDuration:F1} min");
 
-            _logger.LogInformation($"🚀 Simple detection for FE #{engineerId} started ({locationPoints.Count} pts)");
-
-            for (int i = 1; i < locationPoints.Count; i++)
+            // --- DRIVE EVENT (after STOP_DURATION_MINUTES)
+            if (stopDuration >= STOP_DURATION_MINUTES && !isStopped)
             {
-                var prev = locationPoints[i - 1];
-                var curr = locationPoints[i];
-
-                double distMeters = HaversineDistance(prev, curr) * 1000.0;
-                double speedKmh = (curr.Speed ?? 0) * 3.6;
-
-                // 🧠 Debug
-                _logger.LogInformation($"[{engineerId}] {curr.Timestamp:HH:mm:ss} | {distMeters:F1} m | {speedKmh:F1} km/h");
-
-                // --- Movement detection ---
-                if (distMeters > MOVE_DISTANCE_METERS)
+                var driveEvent = new ActivityEvent
                 {
-                    // reset stop timers if moving
-                    stopStartTime = null;
-                    stopStartPoint = null;
-                    isStopped = false;
-                }
-                else
-                {
-                    // within 50 m → possible stop
-                    if (!isStopped)
-                    {
-                        stopStartTime = stopStartTime ?? prev.Timestamp;
-                        stopStartPoint = stopStartPoint ?? prev;
-                        var stopDuration = (curr.Timestamp - stopStartTime.Value).TotalMinutes;
+                    FieldEngineerId = engineerId,
+                    Type = EventType.Drive,
+                    StartTime = pointA.Timestamp,
+                    EndTime = curr.Timestamp,
+                    StartLatitude = pointA.Latitude,
+                    StartLongitude = pointA.Longitude,
+                    EndLatitude = curr.Latitude,
+                    EndLongitude = curr.Longitude,
+                    DistanceKm = HaversineDistance(pointA, curr),
+                    DurationMinutes = (int)stopDuration,
+                };
 
-                        // 🚗 DRIVE event (5 min stop)
-                        if (stopDuration >= STOP_DURATION_MINUTES)
-                        {
-                            var driveEvent = new ActivityEvent
-                            {
-                                FieldEngineerId = engineerId,
-                                Type = EventType.Drive,
-                                StartTime = pointA.Timestamp,
-                                EndTime = curr.Timestamp,
-                                StartLatitude = pointA.Latitude,
-                                StartLongitude = pointA.Longitude,
-                                EndLatitude = curr.Latitude,
-                                EndLongitude = curr.Longitude,
-                                DistanceKm = HaversineDistance(pointA, curr),
-                                DurationMinutes = (int)stopDuration,
-                            };
-                            events.Add(driveEvent);
-                            _logger.LogInformation($"🚗 DRIVE EVENT: {driveEvent.DistanceKm:F2} km from Point A→B");
-
-                            // set new base point for next leg
-                            pointA = curr;
-                            isStopped = true;
-                        }
-
-                        // 🏠 STAY event (15 min stop)
-                        if (stopDuration >= STAY_DURATION_MINUTES)
-                        {
-                            var stayEvent = new ActivityEvent
-                            {
-                                FieldEngineerId = engineerId,
-                                Type = EventType.Stop,
-                                StartTime = stopStartTime.Value,
-                                EndTime = curr.Timestamp,
-                                Latitude = stopStartPoint!.Latitude,
-                                Longitude = stopStartPoint!.Longitude,
-                                DurationMinutes = (int)stopDuration,
-                            };
-                            // add only once
-                            if (!events.Any(e => e.Type == EventType.Stop &&
-             HaversineDistance(
-                 new LocationPoint { Latitude = e.Latitude ?? 0, Longitude = e.Longitude ?? 0 },
-                 new LocationPoint { Latitude = stayEvent.Latitude ?? 0, Longitude = stayEvent.Longitude ?? 0 }
-             ) * 1000 < STAY_RADIUS_METERS))
-                            {
-                                // 🌍 Reverse geocode before saving
-                                var (locationName, address) = await ReverseGeocodeAsync(
-                                    stayEvent.Latitude ?? 0,
-                                    stayEvent.Longitude ?? 0,
-                                    dbContext
-                                );
-
-                                stayEvent.LocationName = locationName;
-                                stayEvent.Address = address;
-
-                                events.Add(stayEvent);
-
-                                _logger.LogInformation($"🏠 STAY EVENT: {stopDuration:F1} min at {address} ({stayEvent.Latitude:F5},{stayEvent.Longitude:F5})");
-                            }
-
-
-
-                            isStopped = true;
-                        }
-                    }
-                }
+                events.Add(driveEvent);
+                _logger.LogInformation($"🚗 DRIVE EVENT: {driveEvent.DistanceKm:F2} km from Point A→B");
+                pointA = curr;
             }
 
-            _logger.LogInformation($"✅ Detected {events.Count} events for FE #{engineerId}");
-            return events;
+            // --- STAY EVENT (after STAY_DURATION_MINUTES)
+            if (stopDuration >= STAY_DURATION_MINUTES)
+            {
+                var stayEvent = new ActivityEvent
+                {
+                    FieldEngineerId = engineerId,
+                    Type = EventType.Stop,
+                    StartTime = stopStartTime.Value,
+                    EndTime = curr.Timestamp,
+                    Latitude = stopStartPoint!.Latitude,
+                    Longitude = stopStartPoint!.Longitude,
+                    DurationMinutes = (int)stopDuration,
+                };
+
+                // Prevent duplicates in same radius
+                bool alreadyLogged = events.Any(e =>
+                    e.Type == EventType.Stop &&
+                    HaversineDistance(
+                        new LocationPoint { Latitude = e.Latitude ?? 0, Longitude = e.Longitude ?? 0 },
+                        new LocationPoint { Latitude = stayEvent.Latitude ?? 0, Longitude = stayEvent.Longitude ?? 0 }
+                    ) * 1000 < STAY_RADIUS_METERS
+                );
+
+                if (!alreadyLogged)
+                {
+                    try
+                    {
+                        // 🌍 Reverse geocode
+                        var (locationName, address) = await ReverseGeocodeAsync(
+                            stayEvent.Latitude ?? 0,
+                            stayEvent.Longitude ?? 0,
+                            dbContext
+                        );
+
+                        stayEvent.LocationName = locationName;
+                        stayEvent.Address = address;
+
+                        await dbContext.ActivityEvents.AddAsync(stayEvent);
+                        await dbContext.SaveChangesAsync();
+
+                        events.Add(stayEvent);
+                        _logger.LogInformation($"🏠 STAY EVENT: {stopDuration:F1} min at {address} ({stayEvent.Latitude:F5},{stayEvent.Longitude:F5})");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, $"🔥 Error creating stay event for FE #{engineerId}");
+                    }
+                }
+
+                isStopped = true;
+            }
         }
+    }
+
+    _logger.LogInformation($"✅ Detected {events.Count} events for FE #{engineerId}");
+    return events;
+}
+
 
 
         private async Task<ActivityEvent?> CreateStopEvent(List<LocationPoint> stopPoints, int engineerId, AppDbContext dbContext)
