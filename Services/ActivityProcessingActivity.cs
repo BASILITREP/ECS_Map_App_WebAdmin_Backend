@@ -42,7 +42,7 @@ namespace EcsFeMappingApi.Services
         public Task StartAsync(CancellationToken cancellationToken)
         {
             _logger.LogInformation("Activity Processing Service is starting.");
-            _timer = new Timer(DoWork, null, TimeSpan.Zero, TimeSpan.FromMinutes(2));
+            _timer = new Timer(DoWork, null, TimeSpan.Zero, TimeSpan.FromSeconds(30));
             return Task.CompletedTask;
         }
 
@@ -161,7 +161,7 @@ namespace EcsFeMappingApi.Services
             var events = new List<ActivityEvent>();
             if (locationPoints.Count < 2) return events;
 
-            const double MOVE_DISTANCE_METERS = 50; // must move >50 m
+            const double MOVE_DISTANCE_METERS = 3; // must move >50 m
             const int STOP_DURATION_MINUTES = 1;    // 5 min stop = Point B (Drive)
             const int STAY_DURATION_MINUTES = 2;   // 15 min stop = Stay
             const double STAY_RADIUS_METERS = 50;   // within same area
