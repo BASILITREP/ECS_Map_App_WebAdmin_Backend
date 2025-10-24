@@ -179,7 +179,7 @@ namespace EcsFeMappingApi.Services
         return events;
     }
 
-    const double MOVE_DISTANCE_METERS = 3;   // Lowered for test
+    const double MOVE_DISTANCE_METERS = 2;   // Lowered for test
     const int STOP_DURATION_MINUTES = 1;     // Drive trigger (short for test)
     const int STAY_DURATION_MINUTES = 2;     // Stay trigger (short for test)
     const double STAY_RADIUS_METERS = 100;   // Looser radius for test
