@@ -111,37 +111,33 @@ namespace EcsFeMappingApi.Services
 
     var newEvents = await DetectEvents(pointsToProcess, engineerId, dbContext);
 
-    if (newEvents.Any())
+   if (newEvents.Any())
+{
+    await dbContext.ActivityEvents.AddRangeAsync(newEvents);
+    _logger.LogInformation($"🆕 Added {newEvents.Count} new events for FE #{engineerId}.");
+}
+
+// ✅ Mark processed points (leave last few minutes unprocessed for continuity)
+var nowUtc = DateTime.UtcNow;
+var keepWindowMinutes = 3; // keep last 3 mins open
+int marked = 0, kept = 0;
+
+foreach (var p in pointsToProcess)
+{
+    if (p.Timestamp <= nowUtc.AddMinutes(-keepWindowMinutes))
     {
-        await dbContext.ActivityEvents.AddRangeAsync(newEvents);
-        _logger.LogInformation($"🆕 Added {newEvents.Count} new events for FE #{engineerId}.");
+        p.IsProcessed = true;
+        marked++;
     }
     else
     {
-        _logger.LogInformation($"📭 No new events detected for FE #{engineerId} (points analyzed: {pointsToProcess.Count}).");
+        kept++;
     }
+}
 
-    // ✅ Leave a trailing window unprocessed so stops/drives can accumulate
-    var nowUtc = DateTime.UtcNow;
-    var windowMinutes = 5; // Keep last 5 minutes unprocessed for continuity
-    var cutoff = nowUtc.AddMinutes(-windowMinutes);
+await dbContext.SaveChangesAsync();
+_logger.LogInformation($"✅ Finished FE #{engineerId}: marked {marked} points as processed, kept {kept} recent ones.");
 
-    int kept = 0, marked = 0;
-    foreach (var p in pointsToProcess)
-    {
-        if (p.Timestamp <= cutoff)
-        {
-            p.IsProcessed = true;
-            marked++;
-        }
-        else
-        {
-            kept++;
-        }
-    }
-
-    await dbContext.SaveChangesAsync();
-    _logger.LogInformation($"✅ Finished FE #{engineerId}: marked {marked}, kept {kept} recent points for next cycle.");
 
     // ✅ Broadcast updated coordinates to web admin
     try
