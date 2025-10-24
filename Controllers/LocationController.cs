@@ -82,9 +82,15 @@ public async Task<IActionResult> PostLocationPoints([FromBody] List<LocationPoin
 
         // ✅ Normalize and prepare
         foreach (var p in points)
-        {
+                {
+            // if (p.FieldEngineerId <= 0)
+            //     return BadRequest("Each point must include a valid FieldEngineerId.");
             if (p.FieldEngineerId <= 0)
-                return BadRequest("Each point must include a valid FieldEngineerId.");
+            {
+                Console.WriteLine($"⚠️ Skipping invalid point (FE ID {p.FieldEngineerId})");
+                continue;
+            }
+
 
             if (p.Timestamp == default)
                 p.Timestamp = DateTime.UtcNow;
