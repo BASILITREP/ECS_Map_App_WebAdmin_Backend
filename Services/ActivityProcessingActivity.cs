@@ -174,10 +174,10 @@ namespace EcsFeMappingApi.Services
     if (locationPoints.Count == 0) return events;
 
     // === CONFIGURABLE THRESHOLDS ===
-    const double STAY_RADIUS_METERS = 50;       // must move >50m from clock-in to start a drive
-    const double MOVE_SPEED_THRESHOLD_KMH = 8.0;
+    const double STAY_RADIUS_METERS = 5;       // must move >50m from clock-in to start a drive
+    const double MOVE_SPEED_THRESHOLD_KMH = 1.0; // 8.0
     const double STOP_SPEED_THRESHOLD_KMH = 3.0;
-    const int DRIVE_STOP_THRESHOLD_MIN = 15;    // must stop ≥10 min to end drive
+    const int DRIVE_STOP_THRESHOLD_MIN = 1;    // must stop ≥15 min to end drive
     const int STAY_MIN_DURATION_MIN = 5;        // minimum stay duration
     const int MIN_TRIP_POINTS = 2;
 
