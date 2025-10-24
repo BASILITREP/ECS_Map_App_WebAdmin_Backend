@@ -174,7 +174,7 @@ _logger.LogInformation($"✅ Finished FE #{engineerId}: marked {marked} points a
     const double MOVE_SPEED_THRESHOLD_KMH = 1.0; // 8.0
     const double STOP_SPEED_THRESHOLD_KMH = 3.0;
     const int DRIVE_STOP_THRESHOLD_MIN = 1;    // must stop ≥15 min to end drive
-    const int STAY_MIN_DURATION_MIN = 5;        // minimum stay duration
+    const int STAY_MIN_DURATION_MIN = 1;        // minimum stay duration
     const int MIN_TRIP_POINTS = 2;
 
     // === STATE TRACKING ===
