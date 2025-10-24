@@ -170,13 +170,14 @@ _logger.LogInformation($"✅ Finished FE #{engineerId}: marked {marked} points a
     if (locationPoints.Count == 0) return events;
 
     // === CONFIGURABLE THRESHOLDS ===
-    const double STAY_RADIUS_METERS = 12;       // ~12m tolerance for jitter
-    const double MOVE_SPEED_THRESHOLD_KMH = 1.0;
+    const double STAY_RADIUS_METERS = 5;       // ~12m tolerance for jitter
+    const double MOVE_SPEED_THRESHOLD_KMH = 0.5;//1.0
     const double STOP_SPEED_THRESHOLD_KMH = 3.0;
-    const int DRIVE_STOP_THRESHOLD_MIN = 2;     // stop ≥2 min to end drive
+    const int DRIVE_STOP_THRESHOLD_MIN = 1;     // stop ≥2 min to end drive
     const int STAY_MIN_DURATION_MIN = 1;        // min stay = 1 min
     const int MIN_TRIP_POINTS = 2;
-    const double MIN_TRIP_DISTANCE_KM = 0.02;   // ignore <20m moves
+    const double MIN_TRIP_DISTANCE_KM = 0.01;   // 0.02
+    
 
     bool isDriving = false;
     DateTime? lastStopTime = null;
