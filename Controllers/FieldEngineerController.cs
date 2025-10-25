@@ -367,6 +367,7 @@ namespace EcsFeMappingApi.Controllers
             _context.AttendanceLogs.Add(log);
             engineer.TimeIn = log.TimeIn; // optional mirror field
             engineer.Status = "Active";
+            engineer.UpdatedAt = DateTime.UtcNow; // ✅ Fix
             await _context.SaveChangesAsync();
 
             // 📡 Notify dashboard in real-time
@@ -392,6 +393,7 @@ namespace EcsFeMappingApi.Controllers
 
             log.TimeOut = DateTime.UtcNow;
             engineer.Status = "Inactive";
+            
 
             await _context.SaveChangesAsync();
 
