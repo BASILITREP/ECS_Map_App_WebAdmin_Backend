@@ -398,7 +398,7 @@ public async Task<IActionResult> ClockOut(int id)
     engineer.Status = "Inactive";
     engineer.IsAvailable = false;
     engineer.UpdatedAt = DateTime.UtcNow;
-    engineer.TimeIn = null; // Optional — clears out TimeIn for clarity
+    engineer.TimeIn = null; // Clear TimeIn on clock out
 
     await _context.SaveChangesAsync();
 
