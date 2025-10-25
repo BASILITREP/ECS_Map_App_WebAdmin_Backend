@@ -30,5 +30,9 @@ namespace EcsFeMappingApi.Models
         public string? Address { get; set; }
         public double? Latitude { get; set; }
         public double? Longitude { get; set; }
+
+        //Drive fare and Duration Enhancements
+        public string? TravelTimeCategory { get; set; }
+        public double? CalculatedFare { get; set; }
     }
 }
