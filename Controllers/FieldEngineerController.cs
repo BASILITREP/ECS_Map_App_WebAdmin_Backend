@@ -183,7 +183,16 @@ namespace EcsFeMappingApi.Controllers
                 // Update the location
                 engineer.CurrentLatitude = locationUpdate.CurrentLatitude;
                 engineer.CurrentLongitude = locationUpdate.CurrentLongitude;
-                engineer.UpdatedAt = DateTime.Now;
+                engineer.UpdatedAt = DateTime.UtcNow;
+
+                // 🔥 Dynamically determine and recover status
+                var newStatus = DetermineStatus(engineer);
+                if (engineer.Status != newStatus)
+                {
+                    engineer.Status = newStatus;
+                    Console.WriteLine($"Status updated for FE #{engineer.Id}: {newStatus}");
+                }
+
 
                 // Save changes
                 await _context.SaveChangesAsync();
@@ -243,7 +252,7 @@ namespace EcsFeMappingApi.Controllers
                         CurrentLongitude = 0.0, // Default location
                         IsActive = true,
                         IsAvailable = true,
-                        Status = "Online",
+                        Status = "Active",
                         CreatedAt = DateTime.UtcNow,
                         UpdatedAt = DateTime.UtcNow
                     };
@@ -259,7 +268,7 @@ namespace EcsFeMappingApi.Controllers
                     fieldEngineer.Name = $"{fieldEngineer.FirstName} {fieldEngineer.LastName}";
                     fieldEngineer.FcmToken = request.FcmToken;
                     fieldEngineer.IsAvailable = true; // Make available upon login
-                    fieldEngineer.Status = "Online";
+                    fieldEngineer.Status = "Active";
                     fieldEngineer.UpdatedAt = DateTime.UtcNow;
 
                     _context.FieldEngineers.Update(fieldEngineer);
@@ -315,6 +324,24 @@ namespace EcsFeMappingApi.Controllers
             return "Unknown location";
         }
 
+        private string DetermineStatus(FieldEngineer fe)
+        {
+            var now = DateTime.UtcNow;
+
+            // 1️⃣ Not clocked in → Inactive
+            if (fe.TimeIn == null)
+                return "Inactive";
+
+            // 2️⃣ Clocked in, check if they’re updating
+            var minutesSinceUpdate = (now - fe.UpdatedAt).TotalMinutes;
+
+            if (minutesSinceUpdate <= 2)
+                return "Active"; // online & sending updates
+            else
+                return "Location Off"; // clocked in but no updates for >2min
+        }
+
+
         // POST: api/FieldEngineer/{id}/clockin
         [HttpPost("{id}/clockin")]
         public async Task<IActionResult> ClockIn(int id)
@@ -339,8 +366,11 @@ namespace EcsFeMappingApi.Controllers
 
             _context.AttendanceLogs.Add(log);
             engineer.TimeIn = log.TimeIn; // optional mirror field
-            engineer.Status = "Clocked In";
+            engineer.Status = "Active";
             await _context.SaveChangesAsync();
+
+            // 📡 Notify dashboard in real-time
+            await _hubContext.Clients.All.SendAsync("ReceiveFieldEngineerUpdate", engineer);
 
             return Ok(new { message = "Clocked in successfully", log });
         }
@@ -361,9 +391,12 @@ namespace EcsFeMappingApi.Controllers
                 return BadRequest("No active Time In found for this engineer.");
 
             log.TimeOut = DateTime.UtcNow;
-            engineer.Status = "Clocked Out";
+            engineer.Status = "Inactive";
 
             await _context.SaveChangesAsync();
+
+            // 📡 Notify dashboard in real-time
+            await _hubContext.Clients.All.SendAsync("ReceiveFieldEngineerUpdate", engineer);
 
             return Ok(new { message = "Clocked out successfully", log });
         }
