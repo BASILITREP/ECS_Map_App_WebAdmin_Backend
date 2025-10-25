@@ -377,31 +377,43 @@ namespace EcsFeMappingApi.Controllers
         }
 
         // POST: api/FieldEngineer/{id}/clockout
-        [HttpPost("{id}/clockout")]
-        public async Task<IActionResult> ClockOut(int id)
-        {
-            var engineer = await _context.FieldEngineers.FindAsync(id);
-            if (engineer == null) return NotFound("Engineer not found");
+[HttpPost("{id}/clockout")]
+public async Task<IActionResult> ClockOut(int id)
+{
+    var engineer = await _context.FieldEngineers.FindAsync(id);
+    if (engineer == null) return NotFound("Engineer not found");
 
-            var log = await _context.AttendanceLogs
-                .Where(l => l.FieldEngineerId == id && l.TimeOut == null)
-                .OrderByDescending(l => l.TimeIn)
-                .FirstOrDefaultAsync();
+    var log = await _context.AttendanceLogs
+        .Where(l => l.FieldEngineerId == id && l.TimeOut == null)
+        .OrderByDescending(l => l.TimeIn)
+        .FirstOrDefaultAsync();
 
-            if (log == null)
-                return BadRequest("No active Time In found for this engineer.");
+    if (log == null)
+        return BadRequest("No active Time In found for this engineer.");
 
-            log.TimeOut = DateTime.UtcNow;
-            engineer.Status = "Inactive";
-            
+    // ✅ End the current session
+    log.TimeOut = DateTime.UtcNow;
 
-            await _context.SaveChangesAsync();
+    // ✅ Update FieldEngineer properties
+    engineer.Status = "Inactive";
+    engineer.IsAvailable = false;
+    engineer.UpdatedAt = DateTime.UtcNow;
+    engineer.TimeIn = null; // Optional — clears out TimeIn for clarity
 
-            // 📡 Notify dashboard in real-time
-            await _hubContext.Clients.All.SendAsync("ReceiveFieldEngineerUpdate", engineer);
+    await _context.SaveChangesAsync();
 
-            return Ok(new { message = "Clocked out successfully", log });
-        }
+    // ✅ 🔥 Real-time update to web admin via SignalR
+    await _hubContext.Clients.All.SendAsync("ReceiveFieldEngineerUpdate", engineer);
+
+    return Ok(new
+    {
+        message = "Clocked out successfully",
+        log,
+        engineer.Status,
+        engineer.UpdatedAt
+    });
+}
+
 
         // GET: api/FieldEngineer/{id}/attendance
         [HttpGet("{id}/attendance")]
