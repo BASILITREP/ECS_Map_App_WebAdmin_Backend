@@ -141,6 +141,8 @@ namespace EcsFeMappingApi.Services
 
                     // ✅ Merge consecutive drives to reduce clutter
                     await MergeConsecutiveDriveEvents(engineerId, dbContext);
+                    // ✅ Merge consecutive stays to reduce clutter
+                    await MergeConsecutiveStayEvents(engineerId, dbContext);
 
                     // ✅ Optional: Cleanup old processed points to save space
                     // var cleanupThreshold = DateTime.UtcNow.AddDays(-2);
@@ -604,6 +606,57 @@ namespace EcsFeMappingApi.Services
             await dbContext.SaveChangesAsync();
             _logger.LogInformation($"✅ Completed drive merge for FE #{engineerId}");
         }
+
+        //Merge stay events that are very close in time and location
+        private async Task MergeConsecutiveStayEvents(int engineerId, AppDbContext dbContext)
+            {
+                var stays = await dbContext.ActivityEvents
+                    .Where(e => e.FieldEngineerId == engineerId && e.Type == EventType.Stop)
+                    .OrderBy(e => e.StartTime)
+                    .ToListAsync();
+
+                if (stays.Count < 2) return;
+
+                for (int i = 0; i < stays.Count - 1; i++)
+                {
+                    var current = stays[i];
+                    var next = stays[i + 1];
+
+                    // ✅ Compute gap and distance
+                    double gapMinutes = (next.StartTime - current.EndTime).TotalMinutes;
+                    double gapDistance = HaversineDistance(
+                        new LocationPoint { Latitude = current.EndLatitude ?? current.StartLatitude ?? 0, Longitude = current.EndLongitude ?? current.StartLongitude ?? 0 },
+                        new LocationPoint { Latitude = next.StartLatitude ?? 0, Longitude = next.StartLongitude ?? 0 }
+                    ) * 1000; // meters
+
+                    // ✅ Merge condition: within 5 minutes gap, within 50 meters radius
+                    if (gapMinutes <= 5 && gapDistance <= 50)
+                    {
+                        _logger.LogInformation($"🔁 Merging consecutive stays (Gap={gapMinutes:F1}min, Dist={gapDistance:F1}m)");
+
+                        // Extend the current stay’s end time and duration
+                        current.EndTime = next.EndTime;
+                        current.DurationMinutes += next.DurationMinutes;
+
+                        // Preserve location info if current is missing
+                        if (string.IsNullOrWhiteSpace(current.LocationName) && !string.IsNullOrWhiteSpace(next.LocationName))
+                            current.LocationName = next.LocationName;
+                        if (string.IsNullOrWhiteSpace(current.Address) && !string.IsNullOrWhiteSpace(next.Address))
+                            current.Address = next.Address;
+
+                        // Delete the merged record
+                        dbContext.ActivityEvents.Remove(next);
+
+                        // Move pointer back one step to recheck merged block
+                        stays.RemoveAt(i + 1);
+                        i--;
+                    }
+                }
+
+                await dbContext.SaveChangesAsync();
+                _logger.LogInformation($"✅ Completed stay merge for FE #{engineerId}");
+            }
+
 
 
 
