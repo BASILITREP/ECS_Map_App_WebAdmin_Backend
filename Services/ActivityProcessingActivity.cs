@@ -668,7 +668,9 @@ namespace EcsFeMappingApi.Services
 
             var httpClient = _httpClientFactory.CreateClient();
             var apiKey = "pk.eyJ1IjoiYmFzaWwxLTIzIiwiYSI6ImNtZWFvNW43ZTA0ejQycHBtd3dkMHJ1bnkifQ.Y-IlM-vQAlaGr7pVQnug3Q";
-            var url = $"https://api.mapbox.com/geocoding/v5/mapbox.places/{lon},{lat}.json?types=poi,address&access_token={apiKey}";
+            var url = $"https://api.mapbox.com/geocoding/v5/mapbox.places/{lon},{lat}.json?types=address,neighborhood,locality&access_token={apiKey}";
+
+            //var url = $"https://api.mapbox.com/geocoding/v5/mapbox.places/{lon},{lat}.json?types=poi,address&access_token={apiKey}";
 
             try
             {
@@ -685,7 +687,22 @@ namespace EcsFeMappingApi.Services
                 if (!jsonDoc.RootElement.TryGetProperty("features", out var features) || features.GetArrayLength() == 0)
                     return ("Unknown", "Unknown Address");
 
-                var feature = features[0];
+                // ✅ Choose most relevant address-type feature
+        JsonElement? selectedFeature = null;
+        foreach (var f in features.EnumerateArray())
+        {
+            if (f.TryGetProperty("place_type", out var types))
+            {
+                var type = types[0].GetString();
+                if (type == "address" || type == "neighborhood" || type == "locality")
+                {
+                    selectedFeature = f;
+                    break;
+                }
+            }
+        }
+
+        var feature = selectedFeature ?? features[0];
                 var locationName = feature.TryGetProperty("text", out var textProp)
                     ? textProp.GetString() ?? "Unknown"
                     : "Unknown";
