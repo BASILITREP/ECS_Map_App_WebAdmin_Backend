@@ -193,12 +193,12 @@ namespace EcsFeMappingApi.Services
 
             // === FIELD MODE (REAL-WORLD USE) ===
             const double STAY_RADIUS_METERS = 12;       // consider as same place if within 12 meters
-            const double MOVE_SPEED_THRESHOLD_KMH = 1.0; // minimum speed to start moving
-            const double STOP_SPEED_THRESHOLD_KMH = 3.0; // threshold for slow/stationary
-            const int DRIVE_STOP_THRESHOLD_MIN = 2;      // must stop ≥2 mins to end a drive
+            const double MOVE_SPEED_THRESHOLD_KMH = 3.0; // minimum speed to start moving
+            const double STOP_SPEED_THRESHOLD_KMH = 1.5; // threshold for slow/stationary
+            const int DRIVE_STOP_THRESHOLD_MIN = 3;      // must stop ≥2 mins to end a drive
             const int STAY_MIN_DURATION_MIN = 1;         // must stay ≥1 min to count as stop
             const int MIN_TRIP_POINTS = 2;               // at least 2 valid points per drive
-            const double MIN_TRIP_DISTANCE_KM = 0.02;    // minimum trip distance ≈ 20 meters
+            const double MIN_TRIP_DISTANCE_KM = 0.3;    // minimum trip distance ≈ 20 meters
 
 
             bool isDriving = false;
@@ -471,7 +471,7 @@ namespace EcsFeMappingApi.Services
 
             // 🚫 Skip extremely short or stationary drives (avoid duplicates / fake drives)
             var totalDuration = (lastPoint.Timestamp - firstPoint.Timestamp).TotalMinutes;
-            if (totalDistance < 0.02 || totalDuration < 1)
+            if (totalDistance < 0.3 || totalDuration < 2)
             {
                 _logger.LogInformation(
                     $"⏸ Ignored micro drive for FE #{engineerId} ({totalDistance:F3} km, {totalDuration:F1} min)");
