@@ -183,11 +183,11 @@ namespace EcsFeMappingApi.Services
     if (locationPoints.Count == 0) return events;
 
     // === Distance-Time Model ===
-    const double STAY_RADIUS_METERS = 15;      // within 15m = same place
-    const double MOVE_THRESHOLD_METERS = 30;   // moved at least 30m = left
-    const int STAY_MIN_DURATION_MIN = 2;       // must stay ≥2 min
+    const double STAY_RADIUS_METERS = 10;      // within 15m = same place
+    const double MOVE_THRESHOLD_METERS = 10;   // moved at least 30m = left
+    const int STAY_MIN_DURATION_MIN = 1;       // must stay ≥2 min
     const int DRIVE_MIN_DURATION_MIN = 1;      // must drive ≥1 min
-    const double MIN_DRIVE_DISTANCE_KM = 0.03; // must move ≥30m total
+    const double MIN_DRIVE_DISTANCE_KM = 0.01; // must move ≥30m total
     const int MIN_POINTS = 2;                  // at least 2 points per segment
 
     bool isDriving = false;
@@ -207,7 +207,10 @@ namespace EcsFeMappingApi.Services
         double distanceMeters = HaversineDistance(prev, current) * 1000;
         double timeDiffMin = (current.Timestamp - prev.Timestamp).TotalMinutes;
 
-        if (timeDiffMin <= 0) continue;
+                if (timeDiffMin <= 0) continue;
+
+                _logger.LogInformation($"📍 FE#{engineerId} Δ={distanceMeters:F1}m Δt={timeDiffMin:F2}min");
+           
 
         // 🚶 FE just left the clock-in area (Point A)
         if (!hasLeftPointA)
