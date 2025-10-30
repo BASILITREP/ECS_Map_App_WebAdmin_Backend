@@ -210,50 +210,72 @@ namespace EcsFeMappingApi.Services
                 if (timeDiffMin <= 0) continue;
 
                 _logger.LogInformation($"📍 FE#{engineerId} Δ={distanceMeters:F1}m Δt={timeDiffMin:F2}min");
-           
 
-        // 🚶 FE just left the clock-in area (Point A)
-        if (!hasLeftPointA)
-        {
-            double distFromStart = HaversineDistance(firstPoint, current) * 1000;
-            if (distFromStart >= MOVE_THRESHOLD_METERS)
-            {
-                hasLeftPointA = true;
-                var stayDuration = (current.Timestamp - stayStartTime).TotalMinutes;
 
-                if (stayDuration >= STAY_MIN_DURATION_MIN)
+                // 🚶 FE just left the clock-in area (Point A)
+                if (!hasLeftPointA)
                 {
-                    var (locName, addr) = await ReverseGeocodeAsync(firstPoint.Latitude, firstPoint.Longitude, dbContext);
-
-                    events.Add(new ActivityEvent
+                    double distFromStart = HaversineDistance(firstPoint, current) * 1000;
+                    if (distFromStart >= MOVE_THRESHOLD_METERS)
                     {
-                        FieldEngineerId = engineerId,
-                        Type = EventType.Stop,
-                        StartTime = stayStartTime,
-                        EndTime = current.Timestamp,
-                        DurationMinutes = (int)stayDuration,
-                        StartLatitude = firstPoint.Latitude,
-                        StartLongitude = firstPoint.Longitude,
-                        LocationName = locName,
-                        Address = addr
-                    });
+                        hasLeftPointA = true;
+                        var stayDuration = (current.Timestamp - stayStartTime).TotalMinutes;
 
-                    _logger.LogInformation($"🏠 Initial stay recorded (Clock-in) at {addr} – {stayDuration:F1} min");
+                        if (stayDuration >= STAY_MIN_DURATION_MIN)
+                        {
+                            var (locName, addr) = await ReverseGeocodeAsync(firstPoint.Latitude, firstPoint.Longitude, dbContext);
+
+                            events.Add(new ActivityEvent
+                            {
+                                FieldEngineerId = engineerId,
+                                Type = EventType.Stop,
+                                StartTime = stayStartTime,
+                                EndTime = current.Timestamp,
+                                DurationMinutes = (int)stayDuration,
+                                StartLatitude = firstPoint.Latitude,
+                                StartLongitude = firstPoint.Longitude,
+                                LocationName = locName,
+                                Address = addr
+                            });
+
+                            _logger.LogInformation($"🏠 Initial stay recorded (Clock-in) at {addr} – {stayDuration:F1} min");
+                        }
+
+                        // After leaving Point A, start drive logic
+                        isDriving = true;
+                        drivePoints.Clear();
+                        drivePoints.Add(prev);
+                        drivePoints.Add(current);
+                        continue;
+                    }
+                    else
+                    {
+                        // Still within clock-in radius → do nothing yet
+                        continue;
+                    }
                 }
-
-                // After leaving Point A, start drive logic
-                isDriving = true;
-                drivePoints.Clear();
-                drivePoints.Add(prev);
-                drivePoints.Add(current);
-                continue;
-            }
-            else
+        
+        // If we are about to move and we had been idle before, close the previous stay
+        if (!isDriving && currentStay != null && distanceMeters >= MOVE_THRESHOLD_METERS)
+        {
+            var stayDuration = (current.Timestamp - currentStay.StartTime).TotalMinutes;
+            if (stayDuration >= STAY_MIN_DURATION_MIN)
             {
-                // Still within clock-in radius → do nothing yet
-                continue;
+                currentStay.EndTime = current.Timestamp;
+                currentStay.DurationMinutes = (int)stayDuration;
+                var (locName, addr) = await ReverseGeocodeAsync(
+                    currentStay.StartLatitude ?? 0,
+                    currentStay.StartLongitude ?? 0,
+                    dbContext
+                );
+                currentStay.LocationName = locName;
+                currentStay.Address = addr;
+                events.Add(currentStay);
+                _logger.LogInformation($"🏠 Stay confirmed before drive: {addr}");
             }
+            currentStay = null;
         }
+
 
         // --- Standard movement logic (after leaving Point A) ---
         if (distanceMeters >= MOVE_THRESHOLD_METERS)
