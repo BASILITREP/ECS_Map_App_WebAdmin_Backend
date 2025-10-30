@@ -119,7 +119,7 @@ namespace EcsFeMappingApi.Services
 
                     // ✅ Mark processed points (leave last few minutes unprocessed for continuity)
                     var nowUtc = DateTime.UtcNow;
-                    var keepWindowMinutes = 1; // keep last 3 mins open
+                    var keepWindowMinutes = 3; // keep last 3 mins open
                     int marked = 0, kept = 0;
 
                     foreach (var p in pointsToProcess)
@@ -505,7 +505,7 @@ namespace EcsFeMappingApi.Services
 
             // 🚫 Skip extremely short or stationary drives (avoid duplicates / fake drives)
             var totalDuration = (lastPoint.Timestamp - firstPoint.Timestamp).TotalMinutes;
-            if (totalDistance < 0.3 || totalDuration < 2)
+            if (totalDistance < 0.3 || totalDuration < 0.5)
             {
                 _logger.LogInformation(
                     $"⏸ Ignored micro drive for FE #{engineerId} ({totalDistance:F3} km, {totalDuration:F1} min)");
