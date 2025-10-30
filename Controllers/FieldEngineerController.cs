@@ -9,6 +9,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.SignalR;
 using EcsFeMappingApi.Services;
 using System.Text.Json;
+using StackExchange.Redis;
+using Newtonsoft.Json;
     
 namespace EcsFeMappingApi.Controllers
 {
@@ -18,11 +20,13 @@ namespace EcsFeMappingApi.Controllers
     {
         private readonly AppDbContext _context;
         private readonly IHubContext<NotificationHub> _hubContext;
+        private readonly IConnectionMultiplexer _redis;
 
-        public FieldEngineerController(AppDbContext context, IHubContext<NotificationHub> hubContext)
+        public FieldEngineerController(AppDbContext context, IHubContext<NotificationHub> hubContext, IConnectionMultiplexer redis)
         {
             _context = context;
             _hubContext = hubContext;
+            _redis = redis;
         }
 
 
@@ -169,45 +173,100 @@ namespace EcsFeMappingApi.Controllers
 
         // POST: api/FieldEngineers/updateLocation
         [HttpPost("updateLocation")]
-        public async Task<IActionResult> UpdateLocation([FromBody] LocationUpdateDto locationUpdate)
+public async Task<IActionResult> UpdateLocation([FromBody] LocationUpdateDto locationUpdate)
+{
+    try
+    {
+        var engineer = await _context.FieldEngineers.FindAsync(locationUpdate.Id);
+        if (engineer == null)
+            return NotFound("Field engineer not found");
+
+        // --- Update the database ---
+        engineer.CurrentLatitude = locationUpdate.CurrentLatitude;
+        engineer.CurrentLongitude = locationUpdate.CurrentLongitude;
+        engineer.UpdatedAt = DateTime.UtcNow;
+
+        var newStatus = DetermineStatus(engineer);
+        if (engineer.Status != newStatus)
         {
-            try
-            {
-                // Find the field engineer by ID
-                var engineer = await _context.FieldEngineers.FindAsync(locationUpdate.Id);
-                if (engineer == null)
-                {
-                    return NotFound("Field engineer not found");
-                }
-
-                // Update the location
-                engineer.CurrentLatitude = locationUpdate.CurrentLatitude;
-                engineer.CurrentLongitude = locationUpdate.CurrentLongitude;
-                engineer.UpdatedAt = DateTime.UtcNow;
-
-                // 🔥 Dynamically determine and recover status
-                var newStatus = DetermineStatus(engineer);
-                if (engineer.Status != newStatus)
-                {
-                    engineer.Status = newStatus;
-                    Console.WriteLine($"Status updated for FE #{engineer.Id}: {newStatus}");
-                }
-
-
-                // Save changes
-                await _context.SaveChangesAsync();
-
-                // Notify all clients about the update
-                Console.WriteLine("📡 Sending SignalR broadcast for FE update...");
-                await _hubContext.Clients.All.SendAsync("ReceiveFieldEngineerUpdate", engineer);
-
-                return Ok();
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, ex.Message);
-            }
+            engineer.Status = newStatus;
+            Console.WriteLine($"Status updated for FE #{engineer.Id}: {newStatus}");
         }
+
+        await _context.SaveChangesAsync();
+
+        // --- 1️⃣ Save to Redis cache ---
+        var db = _redis.GetDatabase();
+        var cacheData = new
+        {
+            Id = engineer.Id,
+            Latitude = engineer.CurrentLatitude,
+            Longitude = engineer.CurrentLongitude,
+            Status = engineer.Status,
+            UpdatedAt = engineer.UpdatedAt
+        };
+
+        await db.StringSetAsync(
+            $"FE:Location:{engineer.Id}",
+            JsonConvert.SerializeObject(cacheData),
+            TimeSpan.FromMinutes(5) // auto-expire after 5 min
+        );
+
+        Console.WriteLine($"📡 Redis updated for FE #{engineer.Id}");
+
+        // --- 2️⃣ Broadcast via SignalR using cached data ---
+        await _hubContext.Clients.All.SendAsync("ReceiveFieldEngineerUpdate", cacheData);
+        Console.WriteLine($"📡 Broadcasted FE #{engineer.Id} update (via Redis cache)");
+
+        return Ok(new { message = "Location updated and cached", cacheData });
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"❌ UpdateLocation error: {ex.Message}");
+        return StatusCode(500, $"Error updating location: {ex.Message}");
+    }
+}
+
+        // [HttpPost("updateLocation")]
+        // public async Task<IActionResult> UpdateLocation([FromBody] LocationUpdateDto locationUpdate)
+        // {
+        //     try
+        //     {
+        //         // Find the field engineer by ID
+        //         var engineer = await _context.FieldEngineers.FindAsync(locationUpdate.Id);
+        //         if (engineer == null)
+        //         {
+        //             return NotFound("Field engineer not found");
+        //         }
+
+        //         // Update the location
+        //         engineer.CurrentLatitude = locationUpdate.CurrentLatitude;
+        //         engineer.CurrentLongitude = locationUpdate.CurrentLongitude;
+        //         engineer.UpdatedAt = DateTime.UtcNow;
+
+        //         // 🔥 Dynamically determine and recover status
+        //         var newStatus = DetermineStatus(engineer);
+        //         if (engineer.Status != newStatus)
+        //         {
+        //             engineer.Status = newStatus;
+        //             Console.WriteLine($"Status updated for FE #{engineer.Id}: {newStatus}");
+        //         }
+
+
+        //         // Save changes
+        //         await _context.SaveChangesAsync();
+
+        //         // Notify all clients about the update
+        //         Console.WriteLine("📡 Sending SignalR broadcast for FE update...");
+        //         await _hubContext.Clients.All.SendAsync("ReceiveFieldEngineerUpdate", engineer);
+
+        //         return Ok();
+        //     }
+        //     catch (Exception ex)
+        //     {
+        //         return StatusCode(500, ex.Message);
+        //     }
+        // }
 
         [HttpGet("{fieldEngineerId}/activity")]
         public async Task<IActionResult> GetFieldEngineerActivity(int fieldEngineerId)

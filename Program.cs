@@ -4,6 +4,7 @@ using EcsFeMappingApi.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
+using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 {
@@ -63,8 +64,15 @@ builder.Services.AddCors(options =>
             .AllowAnyHeader()
             .AllowAnyMethod()
             .AllowCredentials();
-            
+
     });
+});
+
+// Configure Redis
+var redisConnectionString = Environment.GetEnvironmentVariable("REDIS_URL");
+builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
+{
+    return ConnectionMultiplexer.Connect(redisConnectionString);
 });
 
 // JWT Authentication
