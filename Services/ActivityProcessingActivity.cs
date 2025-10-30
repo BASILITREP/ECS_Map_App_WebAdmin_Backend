@@ -184,8 +184,8 @@ namespace EcsFeMappingApi.Services
 
     // === Distance-Time Model ===
     const double STAY_RADIUS_METERS = 10;      // within 15m = same place
-    const double MOVE_THRESHOLD_METERS = 10;   // moved at least 30m = left
-    const int STAY_MIN_DURATION_MIN = 1;       // must stay ≥2 min
+    const double MOVE_THRESHOLD_METERS = 25;   // moved at least 30m = left
+    const int STAY_MIN_DURATION_MIN = 2;       // must stay ≥2 min
     const int DRIVE_MIN_DURATION_MIN = 1;      // must drive ≥1 min
     const double MIN_DRIVE_DISTANCE_KM = 0.01; // must move ≥30m total
     const int MIN_POINTS = 2;                  // at least 2 points per segment
@@ -203,7 +203,13 @@ namespace EcsFeMappingApi.Services
     for (int i = 1; i < locationPoints.Count; i++)
     {
         var prev = locationPoints[i - 1];
-        var current = locationPoints[i];
+                var current = locationPoints[i];
+        
+        if (prev.Latitude == 0 || prev.Longitude == 0 || current.Latitude == 0 || current.Longitude == 0)
+    {
+        _logger.LogWarning($"⚠️ Skipping invalid point for FE#{engineerId}");
+        continue;
+    }
         double distanceMeters = HaversineDistance(prev, current) * 1000;
         double timeDiffMin = (current.Timestamp - prev.Timestamp).TotalMinutes;
 
