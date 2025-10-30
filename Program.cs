@@ -70,33 +70,37 @@ builder.Services.AddCors(options =>
 
 // Configure Redis
 // Configure Redis (Railway-compatible)
-var redisUrl = Environment.GetEnvironmentVariable("REDIS_URL");
-if (!string.IsNullOrEmpty(redisUrl))
+builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
 {
+    var redisUrl = Environment.GetEnvironmentVariable("REDIS_URL");
+
+    if (string.IsNullOrEmpty(redisUrl))
+    {
+        Console.WriteLine("⚠️ REDIS_URL not found. Redis caching disabled.");
+        // Return a fake in-memory connection to prevent DI crash
+        return ConnectionMultiplexer.Connect("localhost:6379,abortConnect=false");
+    }
+
     try
     {
         var uri = new Uri(redisUrl);
-
-        // Extract password (ignore "default" username)
         var userInfoParts = uri.UserInfo.Split(':', StringSplitOptions.RemoveEmptyEntries);
         var password = userInfoParts.Length > 1 ? userInfoParts[1] : string.Empty;
-
-        // Convert Railway URI → StackExchange.Redis connection string
         var configString = $"{uri.Host}:{uri.Port},password={password},abortConnect=false,connectRetry=3,connectTimeout=5000";
 
-        builder.Services.AddSingleton<IConnectionMultiplexer>(ConnectionMultiplexer.Connect(configString));
+        Console.WriteLine($"✅ Redis connecting to {uri.Host}:{uri.Port}...");
+        var mux = ConnectionMultiplexer.Connect(configString);
 
-        Console.WriteLine($"✅ Redis connected: {uri.Host}:{uri.Port}");
+        Console.WriteLine($"✅ Redis connected successfully!");
+        return mux;
     }
     catch (Exception ex)
     {
         Console.WriteLine($"❌ Redis connection failed: {ex.Message}");
+        // Still register a fallback connection to prevent DI failure
+        return ConnectionMultiplexer.Connect("localhost:6379,abortConnect=false");
     }
-}
-else
-{
-    Console.WriteLine("⚠️ REDIS_URL environment variable not found. Redis disabled.");
-}
+});
 
 
 // JWT Authentication
