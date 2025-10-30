@@ -141,8 +141,6 @@ namespace EcsFeMappingApi.Services
 
                     // ✅ Merge consecutive drives to reduce clutter
                     await MergeConsecutiveDriveEvents(engineerId, dbContext);
-                    // ✅ Merge consecutive stays to reduce clutter
-                    await MergeConsecutiveStayEvents(engineerId, dbContext);
 
                     // ✅ Optional: Cleanup old processed points to save space
                     // var cleanupThreshold = DateTime.UtcNow.AddDays(-2);
@@ -193,12 +191,12 @@ namespace EcsFeMappingApi.Services
 
             // === FIELD MODE (REAL-WORLD USE) ===
             const double STAY_RADIUS_METERS = 12;       // consider as same place if within 12 meters
-            const double MOVE_SPEED_THRESHOLD_KMH = 3.0; // minimum speed to start moving
-            const double STOP_SPEED_THRESHOLD_KMH = 1.5; // threshold for slow/stationary
-            const int DRIVE_STOP_THRESHOLD_MIN = 3;      // must stop ≥2 mins to end a drive
+            const double MOVE_SPEED_THRESHOLD_KMH = 1.0; // minimum speed to start moving
+            const double STOP_SPEED_THRESHOLD_KMH = 3.0; // threshold for slow/stationary
+            const int DRIVE_STOP_THRESHOLD_MIN = 2;      // must stop ≥2 mins to end a drive
             const int STAY_MIN_DURATION_MIN = 1;         // must stay ≥1 min to count as stop
             const int MIN_TRIP_POINTS = 2;               // at least 2 valid points per drive
-            const double MIN_TRIP_DISTANCE_KM = 0.3;    // minimum trip distance ≈ 20 meters
+            const double MIN_TRIP_DISTANCE_KM = 0.02;    // minimum trip distance ≈ 20 meters
 
 
             bool isDriving = false;
@@ -471,7 +469,7 @@ namespace EcsFeMappingApi.Services
 
             // 🚫 Skip extremely short or stationary drives (avoid duplicates / fake drives)
             var totalDuration = (lastPoint.Timestamp - firstPoint.Timestamp).TotalMinutes;
-            if (totalDistance < 0.3 || totalDuration < 2)
+            if (totalDistance < 0.02 || totalDuration < 1)
             {
                 _logger.LogInformation(
                     $"⏸ Ignored micro drive for FE #{engineerId} ({totalDistance:F3} km, {totalDuration:F1} min)");
@@ -607,57 +605,6 @@ namespace EcsFeMappingApi.Services
             _logger.LogInformation($"✅ Completed drive merge for FE #{engineerId}");
         }
 
-        //Merge stay events that are very close in time and location
-        private async Task MergeConsecutiveStayEvents(int engineerId, AppDbContext dbContext)
-            {
-                var stays = await dbContext.ActivityEvents
-                    .Where(e => e.FieldEngineerId == engineerId && e.Type == EventType.Stop)
-                    .OrderBy(e => e.StartTime)
-                    .ToListAsync();
-
-                if (stays.Count < 2) return;
-
-                for (int i = 0; i < stays.Count - 1; i++)
-                {
-                    var current = stays[i];
-                    var next = stays[i + 1];
-
-                    // ✅ Compute gap and distance
-                    double gapMinutes = (next.StartTime - current.EndTime).TotalMinutes;
-                    double gapDistance = HaversineDistance(
-                        new LocationPoint { Latitude = current.EndLatitude ?? current.StartLatitude ?? 0, Longitude = current.EndLongitude ?? current.StartLongitude ?? 0 },
-                        new LocationPoint { Latitude = next.StartLatitude ?? 0, Longitude = next.StartLongitude ?? 0 }
-                    ) * 1000; // meters
-
-                    // ✅ Merge condition: within 5 minutes gap, within 50 meters radius
-                    if (gapMinutes <= 5 && gapDistance <= 50)
-                    {
-                        _logger.LogInformation($"🔁 Merging consecutive stays (Gap={gapMinutes:F1}min, Dist={gapDistance:F1}m)");
-
-                        // Extend the current stay’s end time and duration
-                        current.EndTime = next.EndTime;
-                        current.DurationMinutes += next.DurationMinutes;
-
-                        // Preserve location info if current is missing
-                        if (string.IsNullOrWhiteSpace(current.LocationName) && !string.IsNullOrWhiteSpace(next.LocationName))
-                            current.LocationName = next.LocationName;
-                        if (string.IsNullOrWhiteSpace(current.Address) && !string.IsNullOrWhiteSpace(next.Address))
-                            current.Address = next.Address;
-
-                        // Delete the merged record
-                        dbContext.ActivityEvents.Remove(next);
-
-                        // Move pointer back one step to recheck merged block
-                        stays.RemoveAt(i + 1);
-                        i--;
-                    }
-                }
-
-                await dbContext.SaveChangesAsync();
-                _logger.LogInformation($"✅ Completed stay merge for FE #{engineerId}");
-            }
-
-
 
 
 
@@ -668,8 +615,6 @@ namespace EcsFeMappingApi.Services
 
             var httpClient = _httpClientFactory.CreateClient();
             var apiKey = "pk.eyJ1IjoiYmFzaWwxLTIzIiwiYSI6ImNtZWFvNW43ZTA0ejQycHBtd3dkMHJ1bnkifQ.Y-IlM-vQAlaGr7pVQnug3Q";
-            //var url = $"https://api.mapbox.com/geocoding/v5/mapbox.places/{lon},{lat}.json?types=address,neighborhood,locality&access_token={apiKey}";
-
             var url = $"https://api.mapbox.com/geocoding/v5/mapbox.places/{lon},{lat}.json?types=poi,address&access_token={apiKey}";
 
             try
@@ -687,22 +632,7 @@ namespace EcsFeMappingApi.Services
                 if (!jsonDoc.RootElement.TryGetProperty("features", out var features) || features.GetArrayLength() == 0)
                     return ("Unknown", "Unknown Address");
 
-                // ✅ Choose most relevant address-type feature
-        JsonElement? selectedFeature = null;
-        foreach (var f in features.EnumerateArray())
-        {
-            if (f.TryGetProperty("place_type", out var types))
-            {
-                var type = types[0].GetString();
-                if (type == "address" || type == "neighborhood" || type == "locality")
-                {
-                    selectedFeature = f;
-                    break;
-                }
-            }
-        }
-
-        var feature = selectedFeature ?? features[0];
+                var feature = features[0];
                 var locationName = feature.TryGetProperty("text", out var textProp)
                     ? textProp.GetString() ?? "Unknown"
                     : "Unknown";
