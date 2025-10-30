@@ -119,7 +119,7 @@ namespace EcsFeMappingApi.Services
 
                     // ✅ Mark processed points (leave last few minutes unprocessed for continuity)
                     var nowUtc = DateTime.UtcNow;
-                    var keepWindowMinutes = 3; // keep last 3 mins open
+                    var keepWindowMinutes = 1; // keep last 3 mins open
                     int marked = 0, kept = 0;
 
                     foreach (var p in pointsToProcess)
@@ -178,131 +178,220 @@ namespace EcsFeMappingApi.Services
         }
 
         private async Task<List<ActivityEvent>> DetectEvents(List<LocationPoint> locationPoints, int engineerId, AppDbContext dbContext)
-{
-    var events = new List<ActivityEvent>();
-    if (locationPoints.Count == 0) return events;
+        {
+            var events = new List<ActivityEvent>();
+            if (locationPoints.Count == 0) return events;
 
-    // === Distance-Time Model ===
-    const double STAY_RADIUS_METERS = 10;      // within 15m = same place
-    const double MOVE_THRESHOLD_METERS = 25;   // moved at least 30m = left
-    const int STAY_MIN_DURATION_MIN = 2;       // must stay ≥2 min
-    const int DRIVE_MIN_DURATION_MIN = 1;      // must drive ≥1 min
-    const double MIN_DRIVE_DISTANCE_KM = 0.01; // must move ≥30m total
-    const int MIN_POINTS = 2;                  // at least 2 points per segment
+            // === Test indoors ===
+            // const double STAY_RADIUS_METERS = 5;       // ~12m tolerance for jitter
+            // const double MOVE_SPEED_THRESHOLD_KMH = 0.5;//1.0
+            // const double STOP_SPEED_THRESHOLD_KMH = 3.0;
+            // const int DRIVE_STOP_THRESHOLD_MIN = 1;     // stop ≥2 min to end drive
+            // const int STAY_MIN_DURATION_MIN = 1;        // min stay = 1 min
+            // const int MIN_TRIP_POINTS = 2;
+            //         const double MIN_TRIP_DISTANCE_KM = 0.01;   // 0.02
 
-    bool isDriving = false;
-    bool hasLeftPointA = false;                // 🚩 Track first departure
-    var drivePoints = new List<LocationPoint>();
-    ActivityEvent? currentStay = null;
-
-    LocationPoint firstPoint = locationPoints.First();
-    DateTime stayStartTime = firstPoint.Timestamp; // for initial stay timing
-
-    _logger.LogInformation($"🧭 [Distance-Time Mode] DetectEvents FE #{engineerId} ({locationPoints.Count} pts)");
-
-    for (int i = 1; i < locationPoints.Count; i++)
-    {
-        var prev = locationPoints[i - 1];
-                var current = locationPoints[i];
-        
-        if (prev.Latitude == 0 || prev.Longitude == 0 || current.Latitude == 0 || current.Longitude == 0)
-    {
-        _logger.LogWarning($"⚠️ Skipping invalid point for FE#{engineerId}");
-        continue;
-    }
-        double distanceMeters = HaversineDistance(prev, current) * 1000;
-        double timeDiffMin = (current.Timestamp - prev.Timestamp).TotalMinutes;
-
-                if (timeDiffMin <= 0) continue;
-
-                _logger.LogInformation($"📍 FE#{engineerId} Δ={distanceMeters:F1}m Δt={timeDiffMin:F2}min");
+            // === FIELD MODE (REAL-WORLD USE) ===
+            const double STAY_RADIUS_METERS = 12;       // consider as same place if within 12 meters
+            const double MOVE_SPEED_THRESHOLD_KMH = 3.0; // minimum speed to start moving
+            const double STOP_SPEED_THRESHOLD_KMH = 1.5; // threshold for slow/stationary
+            const int DRIVE_STOP_THRESHOLD_MIN = 3;      // must stop ≥2 mins to end a drive
+            const int STAY_MIN_DURATION_MIN = 1;         // must stay ≥1 min to count as stop
+            const int MIN_TRIP_POINTS = 2;               // at least 2 valid points per drive
+            const double MIN_TRIP_DISTANCE_KM = 0.3;    // minimum trip distance ≈ 20 meters
 
 
-                // 🚶 FE just left the clock-in area (Point A)
-                if (!hasLeftPointA)
+            bool isDriving = false;
+            DateTime? lastStopTime = null;
+            var drivePoints = new List<LocationPoint>();
+            ActivityEvent? currentStay = null;
+
+            _logger.LogInformation($"🧭 DetectEvents FE #{engineerId} ({locationPoints.Count} pts)");
+
+            for (int i = 0; i < locationPoints.Count; i++)
+            {
+                var point = locationPoints[i];
+
+                // --- compute speed ---
+                double speedKmh;
+                if (point.Speed == null || point.Speed == 0)
                 {
-                    double distFromStart = HaversineDistance(firstPoint, current) * 1000;
-                    if (distFromStart >= MOVE_THRESHOLD_METERS)
+                    if (i > 0)
                     {
-                        hasLeftPointA = true;
-                        var stayDuration = (current.Timestamp - stayStartTime).TotalMinutes;
+                        var prev = locationPoints[i - 1];
+                        var distKm = HaversineDistance(prev, point);
+                        var timeHr = (point.Timestamp - prev.Timestamp).TotalHours;
+                        speedKmh = (timeHr > 0 ? distKm / timeHr : 0);
+                    }
+                    else speedKmh = 0;
+                }
+                else speedKmh = (point.Speed ?? 0) * 3.6;
 
-                        if (stayDuration >= STAY_MIN_DURATION_MIN)
-                        {
-                            var (locName, addr) = await ReverseGeocodeAsync(firstPoint.Latitude, firstPoint.Longitude, dbContext);
-
-                            events.Add(new ActivityEvent
-                            {
-                                FieldEngineerId = engineerId,
-                                Type = EventType.Stop,
-                                StartTime = stayStartTime,
-                                EndTime = current.Timestamp,
-                                DurationMinutes = (int)stayDuration,
-                                StartLatitude = firstPoint.Latitude,
-                                StartLongitude = firstPoint.Longitude,
-                                LocationName = locName,
-                                Address = addr
-                            });
-
-                            _logger.LogInformation($"🏠 Initial stay recorded (Clock-in) at {addr} – {stayDuration:F1} min");
-                        }
-
-                        // After leaving Point A, start drive logic
+                // ===========================================================
+                // ===============  MOVEMENT / DRIVE DETECTION  ===============
+                // ===========================================================
+                if (speedKmh > MOVE_SPEED_THRESHOLD_KMH)
+                {
+                    // user is moving
+                    if (!isDriving)
+                    {
+                        _logger.LogInformation($"🚗 Drive started at {point.Timestamp:HH:mm:ss}");
                         isDriving = true;
                         drivePoints.Clear();
-                        drivePoints.Add(prev);
-                        drivePoints.Add(current);
-                        continue;
+                        drivePoints.Add(point);
+
+                        // End ongoing stay if any
+                        if (currentStay != null)
+                        {
+                            var stayDuration = (point.Timestamp - currentStay.StartTime).TotalMinutes;
+                            if (stayDuration >= STAY_MIN_DURATION_MIN)
+                            {
+                                currentStay.EndTime = point.Timestamp;
+                                currentStay.DurationMinutes = (int)stayDuration;
+                                var (locName, addr) = await ReverseGeocodeAsync(
+                                    currentStay.StartLatitude ?? 0,
+                                    currentStay.StartLongitude ?? 0,
+                                    dbContext
+                                );
+                                currentStay.LocationName = locName;
+                                currentStay.Address = addr;
+                                events.Add(currentStay);
+                                _logger.LogInformation($"🏠 Stay ended: {addr}");
+                            }
+                            currentStay = null;
+                        }
+                    }
+                    else drivePoints.Add(point);
+
+                    lastStopTime = null;
+                }
+                else
+                {
+                    // user is slow or stationary
+                    if (isDriving)
+                    {
+                        // maybe ending a drive
+                        if (lastStopTime == null)
+                            lastStopTime = point.Timestamp;
+                        else
+                        {
+                            var stoppedFor = (point.Timestamp - lastStopTime.Value).TotalMinutes;
+                            if (stoppedFor >= DRIVE_STOP_THRESHOLD_MIN && drivePoints.Count >= MIN_TRIP_POINTS)
+                            {
+                                // drive ends
+                                var driveEvent = await CreateDriveEvent(drivePoints, engineerId, dbContext);
+
+                                if (driveEvent != null && driveEvent.DistanceKm >= MIN_TRIP_DISTANCE_KM)
+                                {
+                                    // avoid duplicate or near-identical drives
+                                    bool isDuplicate = events.Any(e =>
+                                        e.Type == EventType.Drive &&
+                                        Math.Abs((e.EndTime - driveEvent.EndTime).TotalMinutes) < 2 &&
+                                        HaversineDistance(
+                                            new LocationPoint { Latitude = e.EndLatitude ?? 0, Longitude = e.EndLongitude ?? 0 },
+                                            new LocationPoint { Latitude = driveEvent.EndLatitude ?? 0, Longitude = driveEvent.EndLongitude ?? 0 }
+                                        ) * 1000 < 100
+                                    );
+
+                                    if (!isDuplicate)
+                                    {
+                                        events.Add(driveEvent);
+                                        _logger.LogInformation($"🏁 Drive completed: {driveEvent.DistanceKm:F2} km, {driveEvent.DurationMinutes} min");
+                                    }
+                                    else
+                                    {
+                                        _logger.LogInformation($"⚠️ Skipped duplicate drive ({driveEvent.DistanceKm:F2} km)");
+                                    }
+                                }
+
+                                drivePoints.Clear();
+                                isDriving = false;
+
+                                // start new stay
+                                currentStay = new ActivityEvent
+                                {
+                                    FieldEngineerId = engineerId,
+                                    Type = EventType.Stop,
+                                    StartTime = point.Timestamp,
+                                    StartLatitude = point.Latitude,
+                                    StartLongitude = point.Longitude
+                                };
+                                _logger.LogInformation($"🅿️ Stay started at {point.Timestamp:HH:mm:ss}");
+                            }
+                        }
                     }
                     else
                     {
-                        // Still within clock-in radius → do nothing yet
-                        continue;
+                        // staying still
+                        if (currentStay == null)
+                        {
+                            currentStay = new ActivityEvent
+                            {
+                                FieldEngineerId = engineerId,
+                                Type = EventType.Stop,
+                                StartTime = point.Timestamp,
+                                StartLatitude = point.Latitude,
+                                StartLongitude = point.Longitude
+                            };
+                        }
+                        else
+                        {
+                            // extend stay duration
+                            var distFromStay = HaversineDistance(
+                                new LocationPoint { Latitude = point.Latitude, Longitude = point.Longitude },
+                                new LocationPoint { Latitude = currentStay.StartLatitude ?? 0, Longitude = currentStay.StartLongitude ?? 0 }
+                            ) * 1000;
+
+                            if (distFromStay <= STAY_RADIUS_METERS)
+                                currentStay.EndTime = point.Timestamp;
+                            else
+                            {
+                                var stayDuration = (currentStay.EndTime - currentStay.StartTime).TotalMinutes;
+                                if (stayDuration >= STAY_MIN_DURATION_MIN)
+                                {
+                                    currentStay.DurationMinutes = (int)stayDuration;
+                                    var (locName, addr) = await ReverseGeocodeAsync(
+                                        currentStay.StartLatitude ?? 0,
+                                        currentStay.StartLongitude ?? 0,
+                                        dbContext
+                                    );
+                                    currentStay.LocationName = locName;
+                                    currentStay.Address = addr;
+                                    events.Add(currentStay);
+                                    _logger.LogInformation($"🏠 Stay confirmed: {addr}");
+                                }
+
+                                currentStay = new ActivityEvent
+                                {
+                                    FieldEngineerId = engineerId,
+                                    Type = EventType.Stop,
+                                    StartTime = point.Timestamp,
+                                    StartLatitude = point.Latitude,
+                                    StartLongitude = point.Longitude
+                                };
+                            }
+                        }
                     }
                 }
-        
-        // If we are about to move and we had been idle before, close the previous stay
-        if (!isDriving && currentStay != null && distanceMeters >= MOVE_THRESHOLD_METERS)
-        {
-            var stayDuration = (current.Timestamp - currentStay.StartTime).TotalMinutes;
-            if (stayDuration >= STAY_MIN_DURATION_MIN)
-            {
-                currentStay.EndTime = current.Timestamp;
-                currentStay.DurationMinutes = (int)stayDuration;
-                var (locName, addr) = await ReverseGeocodeAsync(
-                    currentStay.StartLatitude ?? 0,
-                    currentStay.StartLongitude ?? 0,
-                    dbContext
-                );
-                currentStay.LocationName = locName;
-                currentStay.Address = addr;
-                events.Add(currentStay);
-                _logger.LogInformation($"🏠 Stay confirmed before drive: {addr}");
-            }
-            currentStay = null;
-        }
-
-
-        // --- Standard movement logic (after leaving Point A) ---
-        if (distanceMeters >= MOVE_THRESHOLD_METERS)
-        {
-            if (!isDriving)
-            {
-                _logger.LogInformation($"🚗 Drive started at {current.Timestamp:HH:mm:ss}");
-                isDriving = true;
-                drivePoints.Clear();
-                drivePoints.Add(prev);
             }
 
-            drivePoints.Add(current);
+            // finalize any remaining
+            if (isDriving && drivePoints.Count >= MIN_TRIP_POINTS)
+            {
+                var driveEvent = await CreateDriveEvent(drivePoints, engineerId, dbContext);
+                if (driveEvent != null && driveEvent.DistanceKm >= MIN_TRIP_DISTANCE_KM)
+                {
+                    events.Add(driveEvent);
+                    _logger.LogInformation($"🚗 Final drive saved ({driveEvent.DistanceKm:F2} km)");
+                }
+            }
 
-            // End ongoing stay
             if (currentStay != null)
             {
-                var stayDuration = (current.Timestamp - currentStay.StartTime).TotalMinutes;
+                var stayDuration = (locationPoints.Last().Timestamp - currentStay.StartTime).TotalMinutes;
                 if (stayDuration >= STAY_MIN_DURATION_MIN)
                 {
-                    currentStay.EndTime = current.Timestamp;
+                    currentStay.EndTime = locationPoints.Last().Timestamp;
                     currentStay.DurationMinutes = (int)stayDuration;
                     var (locName, addr) = await ReverseGeocodeAsync(
                         currentStay.StartLatitude ?? 0,
@@ -312,149 +401,26 @@ namespace EcsFeMappingApi.Services
                     currentStay.LocationName = locName;
                     currentStay.Address = addr;
                     events.Add(currentStay);
-                    _logger.LogInformation($"🏠 Stay ended: {addr}");
-                }
-                currentStay = null;
-            }
-        }
-        else
-        {
-            // Staying still
-            if (isDriving)
-            {
-                double distFromLastDrivePoint = HaversineDistance(drivePoints.Last(), current) * 1000;
-                if (distFromLastDrivePoint <= STAY_RADIUS_METERS)
-                {
-                    var stoppedDurationMin = (current.Timestamp - drivePoints.Last().Timestamp).TotalMinutes;
-                    if (stoppedDurationMin >= STAY_MIN_DURATION_MIN && drivePoints.Count >= MIN_POINTS)
-                    {
-                        var driveEvent = await CreateDriveEvent(drivePoints, engineerId, dbContext);
-
-                        if (driveEvent != null && driveEvent.DistanceKm >= MIN_DRIVE_DISTANCE_KM)
-                        {
-                            events.Add(driveEvent);
-                            _logger.LogInformation($"🏁 Drive completed: {driveEvent.DistanceKm:F2} km, {driveEvent.DurationMinutes} min");
-                        }
-
-                        isDriving = false;
-                        drivePoints.Clear();
-
-                        // Start new stay
-                        currentStay = new ActivityEvent
-                        {
-                            FieldEngineerId = engineerId,
-                            Type = EventType.Stop,
-                            StartTime = current.Timestamp,
-                            StartLatitude = current.Latitude,
-                            StartLongitude = current.Longitude
-                        };
-                        _logger.LogInformation($"🅿️ Stay started at {current.Timestamp:HH:mm:ss}");
-                    }
+                    _logger.LogInformation($"🏠 Final stay recorded: {addr}");
                 }
             }
-            else
-            {
-                // Extend or start a stay
-                if (currentStay == null)
+
+            // 🔁 merge duplicates
+            events = events
+                .GroupBy(e => new
                 {
-                    currentStay = new ActivityEvent
-                    {
-                        FieldEngineerId = engineerId,
-                        Type = EventType.Stop,
-                        StartTime = current.Timestamp,
-                        StartLatitude = current.Latitude,
-                        StartLongitude = current.Longitude
-                    };
-                }
-                else
-                {
-                    double distFromStay = HaversineDistance(
-                        new LocationPoint { Latitude = current.Latitude, Longitude = current.Longitude },
-                        new LocationPoint { Latitude = currentStay.StartLatitude ?? 0, Longitude = currentStay.StartLongitude ?? 0 }
-                    ) * 1000;
+                    e.Type,
+                    StartLat = Math.Round(e.StartLatitude ?? 0, 5),
+                    StartLon = Math.Round(e.StartLongitude ?? 0, 5),
+                    EndLat = Math.Round(e.EndLatitude ?? 0, 5),
+                    EndLon = Math.Round(e.EndLongitude ?? 0, 5)
+                })
+                .Select(g => g.First())
+                .ToList();
 
-                    if (distFromStay <= STAY_RADIUS_METERS)
-                    {
-                        currentStay.EndTime = current.Timestamp;
-                    }
-                    else
-                    {
-                        var stayDuration = (currentStay.EndTime - currentStay.StartTime).TotalMinutes;
-                        if (stayDuration >= STAY_MIN_DURATION_MIN)
-                        {
-                            currentStay.DurationMinutes = (int)stayDuration;
-                            var (locName, addr) = await ReverseGeocodeAsync(
-                                currentStay.StartLatitude ?? 0,
-                                currentStay.StartLongitude ?? 0,
-                                dbContext
-                            );
-                            currentStay.LocationName = locName;
-                            currentStay.Address = addr;
-                            events.Add(currentStay);
-                            _logger.LogInformation($"🏠 Stay confirmed: {addr}");
-                        }
-
-                        currentStay = new ActivityEvent
-                        {
-                            FieldEngineerId = engineerId,
-                            Type = EventType.Stop,
-                            StartTime = current.Timestamp,
-                            StartLatitude = current.Latitude,
-                            StartLongitude = current.Longitude
-                        };
-                    }
-                }
-            }
+            _logger.LogInformation($"✅ Final total events for FE #{engineerId}: {events.Count}");
+            return events;
         }
-    }
-
-    // Finalize any ongoing drive
-    if (isDriving && drivePoints.Count >= MIN_POINTS)
-    {
-        var driveEvent = await CreateDriveEvent(drivePoints, engineerId, dbContext);
-        if (driveEvent != null && driveEvent.DistanceKm >= MIN_DRIVE_DISTANCE_KM)
-        {
-            events.Add(driveEvent);
-            _logger.LogInformation($"🚗 Final drive saved ({driveEvent.DistanceKm:F2} km)");
-        }
-    }
-
-    // Finalize any ongoing stay
-    if (currentStay != null)
-    {
-        var stayDuration = (locationPoints.Last().Timestamp - currentStay.StartTime).TotalMinutes;
-        if (stayDuration >= STAY_MIN_DURATION_MIN)
-        {
-            currentStay.EndTime = locationPoints.Last().Timestamp;
-            currentStay.DurationMinutes = (int)stayDuration;
-            var (locName, addr) = await ReverseGeocodeAsync(
-                currentStay.StartLatitude ?? 0,
-                currentStay.StartLongitude ?? 0,
-                dbContext
-            );
-            currentStay.LocationName = locName;
-            currentStay.Address = addr;
-            events.Add(currentStay);
-            _logger.LogInformation($"🏠 Final stay recorded: {addr}");
-        }
-    }
-
-    // 🔁 Merge duplicates
-    events = events
-        .GroupBy(e => new
-        {
-            e.Type,
-            StartLat = Math.Round(e.StartLatitude ?? 0, 5),
-            StartLon = Math.Round(e.StartLongitude ?? 0, 5),
-            EndLat = Math.Round(e.EndLatitude ?? 0, 5),
-            EndLon = Math.Round(e.EndLongitude ?? 0, 5)
-        })
-        .Select(g => g.First())
-        .ToList();
-
-    _logger.LogInformation($"✅ Final total events for FE #{engineerId}: {events.Count}");
-    return events;
-}
 
 
 
@@ -505,7 +471,7 @@ namespace EcsFeMappingApi.Services
 
             // 🚫 Skip extremely short or stationary drives (avoid duplicates / fake drives)
             var totalDuration = (lastPoint.Timestamp - firstPoint.Timestamp).TotalMinutes;
-            if (totalDistance < 0.3 || totalDuration < 0.5)
+            if (totalDistance < 0.3 || totalDuration < 2)
             {
                 _logger.LogInformation(
                     $"⏸ Ignored micro drive for FE #{engineerId} ({totalDistance:F3} km, {totalDuration:F1} min)");
