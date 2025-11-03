@@ -163,6 +163,12 @@ namespace EcsFeMappingApi.Services
                                 var hubContext = innerScope.ServiceProvider
                                     .GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<EcsFeMappingApi.Services.NotificationHub>>();
 
+
+                                //Skip updating logged-in engineers
+                                // 🛑 Skip updating logged-in engineers
+                                if (engineer.Status == "Logged In")
+                                    continue;
+                                        
                                 await hubContext.Clients.All.SendAsync("ReceiveFieldEngineerUpdate", engineer);
                                 _logger.LogInformation($"📡 Broadcasted live update for FE #{engineer.Id}: {engineer.CurrentLatitude},{engineer.CurrentLongitude}");
                             }
