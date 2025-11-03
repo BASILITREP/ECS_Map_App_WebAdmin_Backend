@@ -338,28 +338,51 @@ namespace EcsFeMappingApi.Controllers
         }
 
         private string DetermineStatus(FieldEngineer fe)
+        {
+            var now = DateTime.UtcNow;
+
+            // 🟦 Preserve Logged In state if user is logged in but hasn't clocked in
+            if (fe.TimeIn == null)
+            {
+                if (fe.Status == "Logged In")
+                    return "Logged In";
+                if (fe.Status == "Off-work")
+                    return "Off-work";
+                return "Inactive";
+            }
+
+            // 🟢 If clocked in and still sending updates → Active
+            var minutesSinceUpdate = (now - fe.UpdatedAt).TotalMinutes;
+            if (minutesSinceUpdate <= 2)
+                return "Active";
+
+            // 🟡 Clocked in but no update in >2min → Location Off
+            return "Location Off";
+        }
+
+        [HttpPost("{id}/login-sync")]
+public async Task<IActionResult> LoginSync(int id, [FromBody] FieldEngineer updatedData)
 {
-    var now = DateTime.UtcNow;
+    var fieldEngineer = await _context.FieldEngineers.FindAsync(id);
+    if (fieldEngineer == null)
+        return NotFound("Field Engineer not found");
 
-    // 🟦 Preserve Logged In state if user is logged in but hasn't clocked in
-    if (fe.TimeIn == null)
-    {
-        if (fe.Status == "Logged In")
-            return "Logged In";
-        if (fe.Status == "Off-work")
-            return "Off-work";
-        return "Inactive";
-    }
+    // ✅ Update basic login state
+    fieldEngineer.Status = "Logged In";
+    fieldEngineer.IsActive = true;
+    fieldEngineer.IsAvailable = true;
+    fieldEngineer.UpdatedAt = DateTime.UtcNow;
 
-    // 🟢 If clocked in and still sending updates → Active
-    var minutesSinceUpdate = (now - fe.UpdatedAt).TotalMinutes;
-    if (minutesSinceUpdate <= 2)
-        return "Active";
+    await _context.SaveChangesAsync();
 
-    // 🟡 Clocked in but no update in >2min → Location Off
-    return "Location Off";
+    // ✅ Send SignalR broadcast to web dashboard
+    await _hubContext.Clients.All.SendAsync("ReceiveFieldEngineerUpdate", fieldEngineer);
+
+    // ✅ Optional: Log to Railway for debugging
+    Console.WriteLine($"🟢 FE #{fieldEngineer.Id} logged in: {fieldEngineer.Name} at {DateTime.UtcNow}");
+
+    return Ok(new { message = "Login successful", fieldEngineer });
 }
-
 
 
 
