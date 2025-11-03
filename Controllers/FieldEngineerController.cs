@@ -21,11 +21,11 @@ namespace EcsFeMappingApi.Controllers
 
         private readonly FirebaseMessagingService _firebaseService;
 
-        public FieldEngineerController(AppDbContext context, IHubContext<NotificationHub> hubContext)
+        public FieldEngineerController(AppDbContext context, IHubContext<NotificationHub> hubContext, FirebaseMessagingService firebaseService)
         {
             _context = context;
             _hubContext = hubContext;
-            _firebaseService = new FirebaseMessagingService();
+            _firebaseService = firebaseService;
         }
 
 
