@@ -280,6 +280,7 @@ namespace EcsFeMappingApi.Controllers
                     fieldEngineer.Name = $"{fieldEngineer.FirstName} {fieldEngineer.LastName}";
                     fieldEngineer.FcmToken = request.FcmToken;
                     fieldEngineer.IsAvailable = true; // Make available upon login
+                    fieldEngineer.IsActive = true;
                     fieldEngineer.Status = "Logged In";
                     fieldEngineer.UpdatedAt = DateTime.UtcNow;
 
@@ -337,23 +338,28 @@ namespace EcsFeMappingApi.Controllers
         }
 
         private string DetermineStatus(FieldEngineer fe)
-        {
-            var now = DateTime.UtcNow;
+{
+    var now = DateTime.UtcNow;
 
-            // 🟦 If FE just logged in but hasn't clocked in yet
-            if (fe.TimeIn == null)
-            {
-                if (fe.Status == "Logged In") return "Logged In"; // preserve
-                return "Inactive";
-            }
+    // 🟦 Preserve Logged In state if user is logged in but hasn't clocked in
+    if (fe.TimeIn == null)
+    {
+        if (fe.Status == "Logged In")
+            return "Logged In";
+        if (fe.Status == "Off-work")
+            return "Off-work";
+        return "Inactive";
+    }
 
-            // 🟢 If clocked in and still updating
-            var minutesSinceUpdate = (now - fe.UpdatedAt).TotalMinutes;
-            if (minutesSinceUpdate <= 2)
-                return "Active";
-            else
-                return "Location Off";
-        }
+    // 🟢 If clocked in and still sending updates → Active
+    var minutesSinceUpdate = (now - fe.UpdatedAt).TotalMinutes;
+    if (minutesSinceUpdate <= 2)
+        return "Active";
+
+    // 🟡 Clocked in but no update in >2min → Location Off
+    return "Location Off";
+}
+
 
 
 
