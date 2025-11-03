@@ -185,6 +185,18 @@ namespace EcsFeMappingApi.Controllers
                 engineer.CurrentLongitude = locationUpdate.CurrentLongitude;
                 engineer.UpdatedAt = DateTime.UtcNow;
 
+                // ✅ Reverse geocode for address
+                    try
+                    {
+                        var address = await ReverseGeocodeAsync(locationUpdate.CurrentLatitude, locationUpdate.CurrentLongitude);
+                        engineer.CurrentAddress = string.IsNullOrWhiteSpace(address) ? "Unknown" : address;
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Reverse geocode failed: {ex.Message}");
+                        engineer.CurrentAddress = "Unknown";
+                    }
+
                 // 🔥 Dynamically determine and recover status
                 var newStatus = DetermineStatus(engineer);
                 if (engineer.Status != newStatus)
@@ -398,7 +410,7 @@ public async Task<IActionResult> ClockOut(int id)
     engineer.Status = "Inactive";
     engineer.IsAvailable = false;
     engineer.UpdatedAt = DateTime.UtcNow;
-    engineer.TimeIn = null; // Clear TimeIn on clock out
+    //engineer.TimeIn = null; // Clear TimeIn on clock out
 
     await _context.SaveChangesAsync();
 

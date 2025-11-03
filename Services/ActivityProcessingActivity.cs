@@ -119,7 +119,7 @@ namespace EcsFeMappingApi.Services
 
                     // ✅ Mark processed points (leave last few minutes unprocessed for continuity)
                     var nowUtc = DateTime.UtcNow;
-                    var keepWindowMinutes = 1; // keep last 3 mins open
+                    var keepWindowMinutes = 5; // keep last 3 mins open
                     int marked = 0, kept = 0;
 
                     foreach (var p in pointsToProcess)
@@ -405,7 +405,7 @@ namespace EcsFeMappingApi.Services
             const double STAY_RADIUS_METERS = 12;       // consider as same place if within 12 meters
             const double MOVE_SPEED_THRESHOLD_KMH = 1.0; // minimum speed to start moving
             const double STOP_SPEED_THRESHOLD_KMH = 3.0; // threshold for slow/stationary
-            const int DRIVE_STOP_THRESHOLD_MIN = 2;      // must stop ≥2 mins to end a drive
+            const int DRIVE_STOP_THRESHOLD_MIN = 4;      // must stop ≥4 mins to end a drive
             const int STAY_MIN_DURATION_MIN = 1;         // must stay ≥1 min to count as stop
             const int MIN_TRIP_POINTS = 2;               // at least 2 valid points per drive
             const double MIN_TRIP_DISTANCE_KM = 0.02;    // minimum trip distance ≈ 20 meters
@@ -765,7 +765,7 @@ namespace EcsFeMappingApi.Services
                     new LocationPoint { Latitude = next.StartLatitude ?? 0, Longitude = next.StartLongitude ?? 0 }
                 ) * 1000; // meters
 
-                if (gapMinutes < 10 && gapDistance < 100)
+                if (gapMinutes <= 15 && gapDistance <= 250)
                 {
                     _logger.LogInformation($"🔁 Merging consecutive drives (Gap={gapMinutes:F1}min, {gapDistance:F1}m)");
 
