@@ -340,17 +340,21 @@ namespace EcsFeMappingApi.Controllers
         {
             var now = DateTime.UtcNow;
 
-            // 🟦 If just logged in, no TimeIn yet
+            // 🟦 If FE just logged in but hasn't clocked in yet
             if (fe.TimeIn == null)
-                return fe.Status == "Logged In" ? "Logged In" : "Inactive";
+            {
+                if (fe.Status == "Logged In") return "Logged In"; // preserve
+                return "Inactive";
+            }
 
-            // 🟢 If clocked in, check if updates are coming
+            // 🟢 If clocked in and still updating
             var minutesSinceUpdate = (now - fe.UpdatedAt).TotalMinutes;
             if (minutesSinceUpdate <= 2)
                 return "Active";
             else
                 return "Location Off";
         }
+
 
 
 
