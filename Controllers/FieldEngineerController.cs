@@ -264,7 +264,7 @@ namespace EcsFeMappingApi.Controllers
                         CurrentLongitude = 0.0, // Default location
                         IsActive = true,
                         IsAvailable = true,
-                        Status = "Active",
+                        Status = "Logged In",
                         CreatedAt = DateTime.UtcNow,
                         UpdatedAt = DateTime.UtcNow
                     };
@@ -280,7 +280,7 @@ namespace EcsFeMappingApi.Controllers
                     fieldEngineer.Name = $"{fieldEngineer.FirstName} {fieldEngineer.LastName}";
                     fieldEngineer.FcmToken = request.FcmToken;
                     fieldEngineer.IsAvailable = true; // Make available upon login
-                    fieldEngineer.Status = "Active";
+                    fieldEngineer.Status = "Logged In";
                     fieldEngineer.UpdatedAt = DateTime.UtcNow;
 
                     _context.FieldEngineers.Update(fieldEngineer);
@@ -340,18 +340,18 @@ namespace EcsFeMappingApi.Controllers
         {
             var now = DateTime.UtcNow;
 
-            // 1️⃣ Not clocked in → Inactive
+            // 🟦 If just logged in, no TimeIn yet
             if (fe.TimeIn == null)
-                return "Inactive";
+                return fe.Status == "Logged In" ? "Logged In" : "Inactive";
 
-            // 2️⃣ Clocked in, check if they’re updating
+            // 🟢 If clocked in, check if updates are coming
             var minutesSinceUpdate = (now - fe.UpdatedAt).TotalMinutes;
-
             if (minutesSinceUpdate <= 2)
-                return "Active"; // online & sending updates
+                return "Active";
             else
-                return "Location Off"; // clocked in but no updates for >2min
+                return "Location Off";
         }
+
 
 
         // POST: api/FieldEngineer/{id}/clockin
@@ -407,7 +407,7 @@ public async Task<IActionResult> ClockOut(int id)
     log.TimeOut = DateTime.UtcNow;
 
     // ✅ Update FieldEngineer properties
-    engineer.Status = "Inactive";
+    engineer.Status = "Off-work";
     engineer.IsAvailable = false;
     engineer.UpdatedAt = DateTime.UtcNow;
     //engineer.TimeIn = null; // Clear TimeIn on clock out
@@ -438,6 +438,23 @@ public async Task<IActionResult> ClockOut(int id)
 
             return Ok(logs);
         }
+
+        [HttpPost("{id}/logout")]
+        public async Task<IActionResult> Logout(int id)
+        {
+            var engineer = await _context.FieldEngineers.FindAsync(id);
+            if (engineer == null) return NotFound("Engineer not found");
+
+            engineer.Status = "Inactive";
+            engineer.IsAvailable = false;
+            engineer.UpdatedAt = DateTime.UtcNow;
+
+            await _context.SaveChangesAsync();
+            await _hubContext.Clients.All.SendAsync("ReceiveFieldEngineerUpdate", engineer);
+
+            return Ok(new { message = "Logged out successfully" });
+        }
+
 
     }
 
