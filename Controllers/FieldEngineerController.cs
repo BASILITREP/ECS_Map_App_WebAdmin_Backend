@@ -19,10 +19,13 @@ namespace EcsFeMappingApi.Controllers
         private readonly AppDbContext _context;
         private readonly IHubContext<NotificationHub> _hubContext;
 
+        private readonly FirebaseMessagingService _firebaseService;
+
         public FieldEngineerController(AppDbContext context, IHubContext<NotificationHub> hubContext)
         {
             _context = context;
             _hubContext = hubContext;
+            _firebaseService = new FirebaseMessagingService();
         }
 
 
@@ -293,6 +296,20 @@ namespace EcsFeMappingApi.Controllers
                 // Send SignalR notification
                 await _hubContext.Clients.All.SendAsync("ReceiveFieldEngineerUpdate", fieldEngineer);
 
+                // 📱 Send Firebase Push Notification to the Field Engineer
+                if (!string.IsNullOrEmpty(fieldEngineer.FcmToken))
+                {
+                    await _firebaseService.SendNotificationAsync(
+                        "doroti-fe", // your Firebase projectId
+                        fieldEngineer.FcmToken,
+                        "Welcome Back, " + fieldEngineer.FirstName,
+                        "You have successfully logged in to DOROTI."
+                    );
+                }
+                    
+                    
+
+                    Console.WriteLine($"🟢 FE #{fieldEngineer.Id} logged in: {fieldEngineer.Name} at {DateTime.UtcNow}");
                 // Return the complete, updated profile to the app
                 return Ok(fieldEngineer);
             }

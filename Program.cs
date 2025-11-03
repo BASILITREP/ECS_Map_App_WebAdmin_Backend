@@ -38,6 +38,7 @@ builder.Services.AddScoped<EcsFeMappingApi.Services.AuthService>();
 builder.Services.AddScoped<FcmNotificationService>();
 builder.Services.AddSingleton<ActivityProcessingService>();
 builder.Services.AddHostedService(provider => provider.GetRequiredService<ActivityProcessingService>());
+//builder.Services.AddSingleton<FirebaseMessagingService>();
 
 // Configure MySQL
 var connectionString = Environment.GetEnvironmentVariable("MYSQL_URL") 

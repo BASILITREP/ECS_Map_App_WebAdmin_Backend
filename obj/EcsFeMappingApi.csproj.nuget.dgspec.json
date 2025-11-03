@@ -50,7 +50,7 @@
             },
             "Google.Apis.Auth": {
               "target": "Package",
-              "version": "[1.71.0, )"
+              "version": "[1.72.0, )"
             },
             "Microsoft.AspNetCore.Authentication.JwtBearer": {
               "target": "Package",
