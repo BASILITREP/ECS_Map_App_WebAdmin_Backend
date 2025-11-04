@@ -166,5 +166,13 @@ else
     Console.WriteLine($"✅ [Startup] FIREBASE_SERVICE_ACCOUNT loaded, length = {firebaseEnv.Length}");
 }
 
+// 🔥 Force FirebaseMessagingService to initialize on startup
+using (var scope = app.Services.CreateScope())
+{
+    var firebase = scope.ServiceProvider.GetRequiredService<FirebaseMessagingService>();
+    Console.WriteLine("🚀 FirebaseMessagingService initialized successfully at startup.");
+}
+
+
 
 app.Run();
