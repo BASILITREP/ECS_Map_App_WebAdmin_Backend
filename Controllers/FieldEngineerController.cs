@@ -395,7 +395,7 @@ public async Task<IActionResult> LoginSync(int id, [FromBody] FieldEngineer upda
     // ✅ Send SignalR broadcast to web dashboard
     await _hubContext.Clients.All.SendAsync("ReceiveFieldEngineerUpdate", fieldEngineer);
 
-    // ✅ Optional: Log to Railway for debugging
+    // ✅ Optional: Log to console for debugging
     Console.WriteLine($"🟢 FE #{fieldEngineer.Id} logged in: {fieldEngineer.Name} at {DateTime.UtcNow}");
 
     return Ok(new { message = "Login successful", fieldEngineer });
@@ -504,6 +504,29 @@ public async Task<IActionResult> ClockOut(int id)
 
             return Ok(new { message = "Logged out successfully" });
         }
+
+
+        [HttpPost("test-fcm")]
+public async Task<IActionResult> TestFirebase()
+{
+    try
+    {
+        await _firebaseService.SendNotificationAsync(
+            "doroti-fe",
+            "<YOUR_DEVICE_FCM_TOKEN>",
+            "Test from Railway 🚀",
+            "This is a direct test message from your backend."
+        );
+
+        return Ok(new { message = "✅ FCM test message sent!" });
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"❌ FCM test failed: {ex.Message}");
+        return StatusCode(500, new { error = ex.Message });
+    }
+}
+
 
 
     }
