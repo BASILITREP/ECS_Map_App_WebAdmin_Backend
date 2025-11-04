@@ -5,6 +5,9 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
 
+
+
+
 var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 {
     Args = args,
@@ -92,6 +95,8 @@ builder.Services.AddAuthentication(options =>
 });
 
 var app = builder.Build();
+EcsFeMappingApi.Program.ServiceProvider = app.Services;
+
 
 // Auto-create database tables on startup
 using (var scope = app.Services.CreateScope())
@@ -176,3 +181,11 @@ using (var scope = app.Services.CreateScope())
 
 
 app.Run();
+
+namespace EcsFeMappingApi
+{
+    public static class Program
+    {
+        public static IServiceProvider? ServiceProvider { get; set; }
+    }
+}
