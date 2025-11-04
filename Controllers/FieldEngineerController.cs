@@ -513,7 +513,7 @@ public async Task<IActionResult> TestFirebase()
     {
         await _firebaseService.SendNotificationAsync(
             "doroti-fe",
-            "<YOUR_DEVICE_FCM_TOKEN>",
+            "eKw0GPmPTmOxJdi_zUEb3s:APA91bHLFl6lNcl1bditGsTnYu1sNQD2FMBuhrpwFY2rlO0W9-4bfWqI79KKXMf8NRrufTxlk4OuKW0gtV40qr15y2zYXbg0zX7OPq8TiFeiT9ToNlC92PM",
             "Test from Railway 🚀",
             "This is a direct test message from your backend."
         );
