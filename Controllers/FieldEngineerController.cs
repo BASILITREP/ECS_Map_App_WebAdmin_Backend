@@ -9,7 +9,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.SignalR;
 using EcsFeMappingApi.Services;
 using System.Text.Json;
-    
+
 namespace EcsFeMappingApi.Controllers
 {
     [Route("api/[controller]")]
@@ -189,16 +189,16 @@ namespace EcsFeMappingApi.Controllers
                 engineer.UpdatedAt = DateTime.UtcNow;
 
                 // ✅ Reverse geocode for address
-                    try
-                    {
-                        var address = await ReverseGeocodeAsync(locationUpdate.CurrentLatitude, locationUpdate.CurrentLongitude);
-                        engineer.CurrentAddress = string.IsNullOrWhiteSpace(address) ? "Unknown" : address;
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"Reverse geocode failed: {ex.Message}");
-                        engineer.CurrentAddress = "Unknown";
-                    }
+                try
+                {
+                    var address = await ReverseGeocodeAsync(locationUpdate.CurrentLatitude, locationUpdate.CurrentLongitude);
+                    engineer.CurrentAddress = string.IsNullOrWhiteSpace(address) ? "Unknown" : address;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Reverse geocode failed: {ex.Message}");
+                    engineer.CurrentAddress = "Unknown";
+                }
 
                 // 🔥 Dynamically determine and recover status
                 var newStatus = DetermineStatus(engineer);
@@ -306,10 +306,51 @@ namespace EcsFeMappingApi.Controllers
                         "You have successfully logged in to DOROTI."
                     );
                 }
-                    
-                    
 
-                    Console.WriteLine($"🟢 FE #{fieldEngineer.Id} logged in: {fieldEngineer.Name} at {DateTime.UtcNow}");
+
+
+                Console.WriteLine($"🟢 FE #{fieldEngineer.Id} logged in: {fieldEngineer.Name} at {DateTime.UtcNow}");
+                _ = Task.Run(async () =>
+                {
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(60));
+
+                        // Re-check from DB to ensure latest data
+                    using var scope = HttpContext.RequestServices.CreateScope();
+                    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                    var firebase = scope.ServiceProvider.GetRequiredService<FirebaseMessagingService>();
+
+                    var engineerCheck = await db.FieldEngineers.FirstOrDefaultAsync(f => f.Id == fieldEngineer.Id);
+                    if (engineerCheck != null)
+                    {
+                        var hasClockedIn = await db.AttendanceLogs
+                            .AnyAsync(l => l.FieldEngineerId == engineerCheck.Id && l.TimeOut == null);
+
+                        if (!hasClockedIn)
+                        {
+                            Console.WriteLine($"⏰ FE #{engineerCheck.Id} has not clocked in after 60s — sending reminder...");
+                            if (!string.IsNullOrEmpty(engineerCheck.FcmToken))
+                            {
+                                await firebase.SendNotificationAsync(
+                                    "doroti-fe",
+                                    engineerCheck.FcmToken,
+                                    "Clock In Reminder ⏰",
+                                    $"Hey {engineerCheck.FirstName}, don’t forget to clock in!"
+                                );
+                            }
+                        }
+                        else
+                        {
+                            Console.WriteLine($"✅ FE #{engineerCheck.Id} already clocked in, no reminder sent.");
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"⚠️ 60-second clock-in reminder failed: {ex.Message}");
+                }
+                });
                 // Return the complete, updated profile to the app
                 return Ok(fieldEngineer);
             }
@@ -378,28 +419,28 @@ namespace EcsFeMappingApi.Controllers
         }
 
         [HttpPost("{id}/login-sync")]
-public async Task<IActionResult> LoginSync(int id, [FromBody] FieldEngineer updatedData)
-{
-    var fieldEngineer = await _context.FieldEngineers.FindAsync(id);
-    if (fieldEngineer == null)
-        return NotFound("Field Engineer not found");
+        public async Task<IActionResult> LoginSync(int id, [FromBody] FieldEngineer updatedData)
+        {
+            var fieldEngineer = await _context.FieldEngineers.FindAsync(id);
+            if (fieldEngineer == null)
+                return NotFound("Field Engineer not found");
 
-    // ✅ Update basic login state
-    fieldEngineer.Status = "Logged In";
-    fieldEngineer.IsActive = true;
-    fieldEngineer.IsAvailable = true;
-    fieldEngineer.UpdatedAt = DateTime.UtcNow;
+            // ✅ Update basic login state
+            fieldEngineer.Status = "Logged In";
+            fieldEngineer.IsActive = true;
+            fieldEngineer.IsAvailable = true;
+            fieldEngineer.UpdatedAt = DateTime.UtcNow;
 
-    await _context.SaveChangesAsync();
+            await _context.SaveChangesAsync();
 
-    // ✅ Send SignalR broadcast to web dashboard
-    await _hubContext.Clients.All.SendAsync("ReceiveFieldEngineerUpdate", fieldEngineer);
+            // ✅ Send SignalR broadcast to web dashboard
+            await _hubContext.Clients.All.SendAsync("ReceiveFieldEngineerUpdate", fieldEngineer);
 
-    // ✅ Optional: Log to console for debugging
-    Console.WriteLine($"🟢 FE #{fieldEngineer.Id} logged in: {fieldEngineer.Name} at {DateTime.UtcNow}");
+            // ✅ Optional: Log to console for debugging
+            Console.WriteLine($"🟢 FE #{fieldEngineer.Id} logged in: {fieldEngineer.Name} at {DateTime.UtcNow}");
 
-    return Ok(new { message = "Login successful", fieldEngineer });
-}
+            return Ok(new { message = "Login successful", fieldEngineer });
+        }
 
 
 
@@ -439,42 +480,42 @@ public async Task<IActionResult> LoginSync(int id, [FromBody] FieldEngineer upda
         }
 
         // POST: api/FieldEngineer/{id}/clockout
-[HttpPost("{id}/clockout")]
-public async Task<IActionResult> ClockOut(int id)
-{
-    var engineer = await _context.FieldEngineers.FindAsync(id);
-    if (engineer == null) return NotFound("Engineer not found");
+        [HttpPost("{id}/clockout")]
+        public async Task<IActionResult> ClockOut(int id)
+        {
+            var engineer = await _context.FieldEngineers.FindAsync(id);
+            if (engineer == null) return NotFound("Engineer not found");
 
-    var log = await _context.AttendanceLogs
-        .Where(l => l.FieldEngineerId == id && l.TimeOut == null)
-        .OrderByDescending(l => l.TimeIn)
-        .FirstOrDefaultAsync();
+            var log = await _context.AttendanceLogs
+                .Where(l => l.FieldEngineerId == id && l.TimeOut == null)
+                .OrderByDescending(l => l.TimeIn)
+                .FirstOrDefaultAsync();
 
-    if (log == null)
-        return BadRequest("No active Time In found for this engineer.");
+            if (log == null)
+                return BadRequest("No active Time In found for this engineer.");
 
-    // ✅ End the current session
-    log.TimeOut = DateTime.UtcNow;
+            // ✅ End the current session
+            log.TimeOut = DateTime.UtcNow;
 
-    // ✅ Update FieldEngineer properties
-    engineer.Status = "Off-work";
-    engineer.IsAvailable = false;
-    engineer.UpdatedAt = DateTime.UtcNow;
-    //engineer.TimeIn = null; // Clear TimeIn on clock out
+            // ✅ Update FieldEngineer properties
+            engineer.Status = "Off-work";
+            engineer.IsAvailable = false;
+            engineer.UpdatedAt = DateTime.UtcNow;
+            //engineer.TimeIn = null; // Clear TimeIn on clock out
 
-    await _context.SaveChangesAsync();
+            await _context.SaveChangesAsync();
 
-    // ✅ 🔥 Real-time update to web admin via SignalR
-    await _hubContext.Clients.All.SendAsync("ReceiveFieldEngineerUpdate", engineer);
+            // ✅ 🔥 Real-time update to web admin via SignalR
+            await _hubContext.Clients.All.SendAsync("ReceiveFieldEngineerUpdate", engineer);
 
-    return Ok(new
-    {
-        message = "Clocked out successfully",
-        log,
-        engineer.Status,
-        engineer.UpdatedAt
-    });
-}
+            return Ok(new
+            {
+                message = "Clocked out successfully",
+                log,
+                engineer.Status,
+                engineer.UpdatedAt
+            });
+        }
 
 
         // GET: api/FieldEngineer/{id}/attendance
@@ -506,34 +547,34 @@ public async Task<IActionResult> ClockOut(int id)
         }
 
 
-        [HttpPost("test-fcm")]
-public async Task<IActionResult> TestFirebase()
-{
-    try
-    {
-        await _firebaseService.SendNotificationAsync(
-            "doroti-fe",
-            "eKw0GPmPTmOxJdi_zUEb3s:APA91bHLFl6lNcl1bditGsTnYu1sNQD2FMBuhrpwFY2rlO0W9-4bfWqI79KKXMf8NRrufTxlk4OuKW0gtV40qr15y2zYXbg0zX7OPq8TiFeiT9ToNlC92PM",
-            "Test from Railway 🚀",
-            "This is a direct test message from your backend."
-        );
+        // [HttpPost("test-fcm")]
+        // public async Task<IActionResult> TestFirebase()
+        // {
+        //     try
+        //     {
+        //         await _firebaseService.SendNotificationAsync(
+        //             "doroti-fe",
+        //             "eKw0GPmPTmOxJdi_zUEb3s:APA91bHLFl6lNcl1bditGsTnYu1sNQD2FMBuhrpwFY2rlO0W9-4bfWqI79KKXMf8NRrufTxlk4OuKW0gtV40qr15y2zYXbg0zX7OPq8TiFeiT9ToNlC92PM",
+        //             "Test from Railway 🚀",
+        //             "This is a direct test message from your backend."
+        //         );
 
-        return Ok(new { message = "✅ FCM test message sent!" });
+        //         return Ok(new { message = "✅ FCM test message sent!" });
+        //     }
+        //     catch (Exception ex)
+        //     {
+        //         Console.WriteLine($"❌ FCM test failed: {ex.Message}");
+        //         return StatusCode(500, new { error = ex.Message });
+        //     }
+        // }
+
+
+
     }
-    catch (Exception ex)
-    {
-        Console.WriteLine($"❌ FCM test failed: {ex.Message}");
-        return StatusCode(500, new { error = ex.Message });
-    }
-}
 
 
 
-    }
 
-    
-    
-    
 
 
 
@@ -559,5 +600,5 @@ public async Task<IActionResult> TestFirebase()
         public string? LastName { get; set; }   // Add these
         public string FcmToken { get; set; }
     }
-    
+
 }
