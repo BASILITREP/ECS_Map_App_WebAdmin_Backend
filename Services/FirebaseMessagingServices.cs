@@ -7,14 +7,21 @@ public class FirebaseMessagingService
     private readonly GoogleCredential _credential;
 
     public FirebaseMessagingService()
+{
+    var json = Environment.GetEnvironmentVariable("FIREBASE_SERVICE_ACCOUNT");
+    if (string.IsNullOrEmpty(json))
     {
-        var json = Environment.GetEnvironmentVariable("FIREBASE_SERVICE_ACCOUNT");
-        if (string.IsNullOrEmpty(json))
-            throw new Exception("FIREBASE_SERVICE_ACCOUNT not set");
-
-        _credential = GoogleCredential.FromJson(json)
-            .CreateScoped("https://www.googleapis.com/auth/firebase.messaging");
+        Console.WriteLine("❌ FIREBASE_SERVICE_ACCOUNT not found in environment variables.");
+        throw new Exception("FIREBASE_SERVICE_ACCOUNT not set");
     }
+
+    Console.WriteLine("✅ FIREBASE_SERVICE_ACCOUNT found. Initializing credentials...");
+    _credential = GoogleCredential.FromJson(json)
+        .CreateScoped("https://www.googleapis.com/auth/firebase.messaging");
+
+    Console.WriteLine("✅ Firebase credentials initialized successfully.");
+}
+
 
     private async Task<string> GetAccessTokenAsync()
     {
