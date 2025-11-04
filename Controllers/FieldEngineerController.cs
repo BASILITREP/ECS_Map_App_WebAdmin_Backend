@@ -439,6 +439,48 @@ namespace EcsFeMappingApi.Controllers
             // ✅ Optional: Log to console for debugging
             Console.WriteLine($"🟢 FE #{fieldEngineer.Id} logged in: {fieldEngineer.Name} at {DateTime.UtcNow}");
 
+            _ = Task.Run(async () =>
+                {
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(60));
+
+                        // Re-check from DB to ensure latest data
+                    using var scope = HttpContext.RequestServices.CreateScope();
+                    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                    var firebase = scope.ServiceProvider.GetRequiredService<FirebaseMessagingService>();
+
+                    var engineerCheck = await db.FieldEngineers.FirstOrDefaultAsync(f => f.Id == fieldEngineer.Id);
+                    if (engineerCheck != null)
+                    {
+                        var hasClockedIn = await db.AttendanceLogs
+                            .AnyAsync(l => l.FieldEngineerId == engineerCheck.Id && l.TimeOut == null);
+
+                        if (!hasClockedIn)
+                        {
+                            Console.WriteLine($"⏰ FE #{engineerCheck.Id} has not clocked in after 60s — sending reminder...");
+                            if (!string.IsNullOrEmpty(engineerCheck.FcmToken))
+                            {
+                                await firebase.SendNotificationAsync(
+                                    "doroti-fe",
+                                    engineerCheck.FcmToken,
+                                    "Clock In Reminder ⏰",
+                                    $"Hey {engineerCheck.FirstName}, don’t forget to clock in!"
+                                );
+                            }
+                        }
+                        else
+                        {
+                            Console.WriteLine($"✅ FE #{engineerCheck.Id} already clocked in, no reminder sent.");
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"⚠️ 60-second clock-in reminder failed: {ex.Message}");
+                }
+                });
+
             return Ok(new { message = "Login successful", fieldEngineer });
         }
 
