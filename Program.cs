@@ -149,10 +149,22 @@ app.MapPost("/trigger-activity", async (ActivityProcessingService svc) =>
 
 
 // Test endpoint for CORS
-app.MapGet("/api/test", () => new {
+app.MapGet("/api/test", () => new
+{
     message = "CORS test endpoint working!",
     timestamp = DateTime.UtcNow,
     cors = "Success"
 }).RequireCors("AllowFrontend");
+
+var firebaseEnv = Environment.GetEnvironmentVariable("FIREBASE_SERVICE_ACCOUNT");
+if (string.IsNullOrEmpty(firebaseEnv))
+{
+    Console.WriteLine("❌ [Startup] FIREBASE_SERVICE_ACCOUNT is missing or empty.");
+}
+else
+{
+    Console.WriteLine($"✅ [Startup] FIREBASE_SERVICE_ACCOUNT loaded, length = {firebaseEnv.Length}");
+}
+
 
 app.Run();
