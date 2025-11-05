@@ -119,7 +119,7 @@ namespace EcsFeMappingApi.Services
 
                     // ✅ Mark processed points (leave last few minutes unprocessed for continuity)
                     var nowUtc = DateTime.UtcNow;
-                    var keepWindowMinutes = 5; // keep last 3 mins open
+                    var keepWindowMinutes = 10; // keep last 3 mins open
                     int marked = 0, kept = 0;
 
                     foreach (var p in pointsToProcess)
