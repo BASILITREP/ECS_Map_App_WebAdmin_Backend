@@ -420,82 +420,71 @@ namespace EcsFeMappingApi.Controllers
         }
 
         [HttpPost("{id}/login-sync")]
-public async Task<IActionResult> LoginSync(int id, [FromBody] FieldEngineer updatedData)
+        public async Task<IActionResult> LoginSync(int id, [FromBody] FieldEngineer updatedData)
+        {
+            var fieldEngineer = await _context.FieldEngineers.FindAsync(id);
+            if (fieldEngineer == null)
+                return NotFound("Field Engineer not found");
+
+            // ✅ Update basic login state
+            fieldEngineer.Status = "Logged In";
+            fieldEngineer.IsActive = true;
+            fieldEngineer.IsAvailable = true;
+            fieldEngineer.UpdatedAt = DateTime.UtcNow;
+
+            await _context.SaveChangesAsync();
+
+            // ✅ Send SignalR broadcast to web dashboard
+            await _hubContext.Clients.All.SendAsync("ReceiveFieldEngineerUpdate", fieldEngineer);
+
+            // ✅ Optional: Log to console for debugging
+            Console.WriteLine($"🟢 FE #{fieldEngineer.Id} logged in: {fieldEngineer.Name} at {DateTime.UtcNow}");
+
+            _ = Task.Run(async () =>
 {
-    var fieldEngineer = await _context.FieldEngineers.FindAsync(id);
-    if (fieldEngineer == null)
-        return NotFound("Field Engineer not found");
-
-    // ✅ Update login state but keep existing data
-    fieldEngineer.Status = "Logged In";
-    fieldEngineer.IsActive = true;
-    fieldEngineer.IsAvailable = true;
-    fieldEngineer.UpdatedAt = DateTime.UtcNow;
-
-    // 🕒 Ensure TimeIn is not null (prevents "Invalid Date")
-    fieldEngineer.TimeIn ??= DateTime.UtcNow;
-
-    // 🧭 Keep old address or placeholder
-    if (string.IsNullOrWhiteSpace(fieldEngineer.CurrentAddress))
-        fieldEngineer.CurrentAddress = "Awaiting GPS signal...";
-
-    await _context.SaveChangesAsync();
-
-    // 🚀 Broadcast after a small delay (gives mobile time to send location)
-    _ = Task.Run(async () =>
+    try
     {
-        await Task.Delay(TimeSpan.FromSeconds(5)); // delay 5s
+        await Task.Delay(TimeSpan.FromSeconds(60));
+
+        // ✅ Create an independent service scope
         using var scope = EcsFeMappingApi.Program.ServiceProvider!.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var hub = scope.ServiceProvider.GetRequiredService<IHubContext<NotificationHub>>();
-        var fe = await db.FieldEngineers.FindAsync(id);
+        var firebase = scope.ServiceProvider.GetRequiredService<FirebaseMessagingService>();
 
-        if (fe != null)
+        var engineerCheck = await db.FieldEngineers.FirstOrDefaultAsync(f => f.Id == fieldEngineer.Id);
+        if (engineerCheck != null)
         {
-            await hub.Clients.All.SendAsync("ReceiveFieldEngineerUpdate", fe);
-            Console.WriteLine($"📡 Delayed SignalR broadcast sent for FE #{fe.Id} ({fe.Status})");
-        }
-    });
+            var hasClockedIn = await db.AttendanceLogs
+                .AnyAsync(l => l.FieldEngineerId == engineerCheck.Id && l.TimeOut == null);
 
-    Console.WriteLine($"🟢 FE #{fieldEngineer.Id} logged in: {fieldEngineer.Name} at {DateTime.UtcNow}");
-
-    // 🔔 Reminder task (no change)
-    _ = Task.Run(async () =>
-    {
-        try
-        {
-            await Task.Delay(TimeSpan.FromSeconds(60));
-            using var scope = EcsFeMappingApi.Program.ServiceProvider!.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            var firebase = scope.ServiceProvider.GetRequiredService<FirebaseMessagingService>();
-
-            var engineerCheck = await db.FieldEngineers.FirstOrDefaultAsync(f => f.Id == fieldEngineer.Id);
-            if (engineerCheck != null)
+            if (!hasClockedIn)
             {
-                var hasClockedIn = await db.AttendanceLogs
-                    .AnyAsync(l => l.FieldEngineerId == engineerCheck.Id && l.TimeOut == null);
-
-                if (!hasClockedIn && !string.IsNullOrEmpty(engineerCheck.FcmToken))
+                Console.WriteLine($"⏰ FE #{engineerCheck.Id} has not clocked in after 60s — sending reminder standby...");
+                if (!string.IsNullOrEmpty(engineerCheck.FcmToken))
                 {
                     await firebase.SendNotificationAsync(
                         "doroti-fe",
                         engineerCheck.FcmToken,
                         "Clock In Reminder ⏰",
-                        $"Hey {engineerCheck.FirstName}, don’t forget to clock in!"
+                        $"Hey {engineerCheck.FirstName}, don’t forget to clock in please!"
                     );
                 }
             }
+            else
+            {
+                Console.WriteLine($"✅ FE #{engineerCheck.Id} already clocked in, no reminder sent.");
+            }
         }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"⚠️ 60-second clock-in reminder failed: {ex.Message}");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"⚠️ 60-second clock-in reminder failed: {ex.Message}");
+    }
+});
+
+
+            return Ok(new { message = "Login successful", fieldEngineer });
         }
-    });
-
-    return Ok(new { message = "Login successful", fieldEngineer });
-}
-
-
 
 
 
