@@ -416,7 +416,7 @@ namespace EcsFeMappingApi.Services
             const int MIN_TRIP_POINTS = 2;               // at least 2 valid points per drive
             const double MIN_TRIP_DISTANCE_KM = 0.02;    // minimum trip distance ≈ 20 meters
 
-
+            // --- state variables ---
             bool isDriving = false;
             DateTime? lastStopTime = null;
             var drivePoints = new List<LocationPoint>();
@@ -444,7 +444,7 @@ namespace EcsFeMappingApi.Services
                 else speedKmh = (point.Speed ?? 0) * 3.6;
 
                 // ===========================================================
-                // ===============  MOVEMENT / DRIVE DETECTION  ===============
+                // ===============  MOVEMENT / DRIVE DETECTION MECHANICS  ===============
                 // ===========================================================
                 if (speedKmh > MOVE_SPEED_THRESHOLD_KMH)
                 {
