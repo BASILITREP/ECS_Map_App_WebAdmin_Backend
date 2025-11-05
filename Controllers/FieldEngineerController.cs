@@ -490,105 +490,140 @@ namespace EcsFeMappingApi.Controllers
 
 
         // POST: api/FieldEngineer/{id}/clockin
-        [HttpPost("{id}/clockin")]
-        public async Task<IActionResult> ClockIn(int id)
-        {
-            var engineer = await _context.FieldEngineers.FindAsync(id);
-            if (engineer == null) return NotFound("Engineer not found");
+[HttpPost("{id}/clockin")]
+public async Task<IActionResult> ClockIn(int id)
+{
+    var engineer = await _context.FieldEngineers.FindAsync(id);
+    if (engineer == null) return NotFound("Engineer not found");
 
-            // Prevent double Time In without Time Out
-            var existingLog = await _context.AttendanceLogs
-                .Where(l => l.FieldEngineerId == id && l.TimeOut == null)
-                .FirstOrDefaultAsync();
+    // Prevent double Time In without Time Out
+    var existingLog = await _context.AttendanceLogs
+        .Where(l => l.FieldEngineerId == id && l.TimeOut == null)
+        .FirstOrDefaultAsync();
 
-            if (existingLog != null)
-                return BadRequest("Already clocked in, please clock out first.");
+    if (existingLog != null)
+        return BadRequest("Already clocked in, please clock out first.");
 
-            var log = new AttendanceLogModel
-            {
-                FieldEngineerId = id,
-                TimeIn = DateTime.UtcNow,
-                Location = engineer.CurrentAddress
-            };
+    // ✅ Use PH (UTC+8) time instead of UTC
+    var phTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Singapore Standard Time");
+    var phNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, phTimeZone);
 
-            _context.AttendanceLogs.Add(log);
-            engineer.TimeIn = log.TimeIn; // optional mirror field
-            engineer.Status = "Active";
-            engineer.UpdatedAt = DateTime.UtcNow; // ✅ Fix
-            await _context.SaveChangesAsync();
+    var log = new AttendanceLogModel
+    {
+        FieldEngineerId = id,
+        TimeIn = phNow,
+        Location = engineer.CurrentAddress
+    };
 
-            // 📡 Notify dashboard in real-time
-            await _hubContext.Clients.All.SendAsync("ReceiveFieldEngineerUpdate", engineer);
+    _context.AttendanceLogs.Add(log);
 
-            return Ok(new { message = "Clocked in successfully", log });
-        }
+    engineer.TimeIn = log.TimeIn; // Mirror TimeIn
+    engineer.Status = "Active";
+    engineer.UpdatedAt = phNow;
+    await _context.SaveChangesAsync();
 
-        // POST: api/FieldEngineer/{id}/clockout
-        [HttpPost("{id}/clockout")]
-        public async Task<IActionResult> ClockOut(int id)
-        {
-            var engineer = await _context.FieldEngineers.FindAsync(id);
-            if (engineer == null) return NotFound("Engineer not found");
+    // 📡 Notify dashboard in real-time
+    await _hubContext.Clients.All.SendAsync("ReceiveFieldEngineerUpdate", engineer);
 
-            var log = await _context.AttendanceLogs
-                .Where(l => l.FieldEngineerId == id && l.TimeOut == null)
-                .OrderByDescending(l => l.TimeIn)
-                .FirstOrDefaultAsync();
+    return Ok(new { message = "Clocked in successfully", log });
+}
 
-            if (log == null)
-                return BadRequest("No active Time In found for this engineer.");
 
-            // ✅ End the current session
-            log.TimeOut = DateTime.UtcNow;
+// POST: api/FieldEngineer/{id}/clockout
+[HttpPost("{id}/clockout")]
+public async Task<IActionResult> ClockOut(int id)
+{
+    var engineer = await _context.FieldEngineers.FindAsync(id);
+    if (engineer == null) return NotFound("Engineer not found");
 
-            // ✅ Update FieldEngineer properties
-            engineer.Status = "Off-work";
-            engineer.IsAvailable = false;
-            engineer.UpdatedAt = DateTime.UtcNow;
-            //engineer.TimeIn = null; // Clear TimeIn on clock out
+    var log = await _context.AttendanceLogs
+        .Where(l => l.FieldEngineerId == id && l.TimeOut == null)
+        .OrderByDescending(l => l.TimeIn)
+        .FirstOrDefaultAsync();
 
-            await _context.SaveChangesAsync();
+    if (log == null)
+        return BadRequest("No active Time In found for this engineer.");
 
-            // ✅ 🔥 Real-time update to web admin via SignalR
-            await _hubContext.Clients.All.SendAsync("ReceiveFieldEngineerUpdate", engineer);
+    // ✅ Use PH local time for clock-out
+    var phTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Singapore Standard Time");
+    var phNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, phTimeZone);
 
-            return Ok(new
-            {
-                message = "Clocked out successfully",
-                log,
-                engineer.Status,
-                engineer.UpdatedAt
-            });
-        }
+    // ✅ End the current session
+    log.TimeOut = phNow;
+
+    // ✅ Update FieldEngineer properties
+    engineer.Status = "Off-work";
+    engineer.IsAvailable = false;
+    engineer.UpdatedAt = phNow;
+
+    await _context.SaveChangesAsync();
+
+    // ✅ 🔥 Real-time update to web admin via SignalR
+    await _hubContext.Clients.All.SendAsync("ReceiveFieldEngineerUpdate", engineer);
+
+    return Ok(new
+    {
+        message = "Clocked out successfully",
+        log,
+        engineer.Status,
+        engineer.UpdatedAt
+    });
+}
+
 
 
         // GET: api/FieldEngineer/{id}/attendance
-        [HttpGet("{id}/attendance")]
-        public async Task<IActionResult> GetAttendanceLogs(int id)
-        {
-            var logs = await _context.AttendanceLogs
-                .Where(l => l.FieldEngineerId == id)
-                .OrderByDescending(l => l.TimeIn)
-                .ToListAsync();
+[HttpGet("{id}/attendance")]
+public async Task<IActionResult> GetAttendanceLogs(int id)
+{
+    var logs = await _context.AttendanceLogs
+        .Where(l => l.FieldEngineerId == id)
+        .OrderByDescending(l => l.TimeIn)
+        .ToListAsync();
 
-            return Ok(logs);
-        }
+    // ✅ Convert each log’s time to PH local time before sending
+    var phTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Singapore Standard Time");
 
-        [HttpPost("{id}/logout")]
-        public async Task<IActionResult> Logout(int id)
-        {
-            var engineer = await _context.FieldEngineers.FindAsync(id);
-            if (engineer == null) return NotFound("Engineer not found");
+    var localizedLogs = logs.Select(l => new
+    {
+        l.Id,
+        l.FieldEngineerId,
+        TimeIn = TimeZoneInfo.ConvertTimeFromUtc(l.TimeIn, phTimeZone),
+        TimeOut = l.TimeOut.HasValue
+            ? TimeZoneInfo.ConvertTimeFromUtc(l.TimeOut.Value, phTimeZone)
+            : (DateTime?)null,
+        l.Location
+    });
 
-            engineer.Status = "Inactive";
-            engineer.IsAvailable = false;
-            engineer.UpdatedAt = DateTime.UtcNow;
+    return Ok(localizedLogs);
+}
 
-            await _context.SaveChangesAsync();
-            await _hubContext.Clients.All.SendAsync("ReceiveFieldEngineerUpdate", engineer);
 
-            return Ok(new { message = "Logged out successfully" });
-        }
+// POST: api/FieldEngineer/{id}/logout
+[HttpPost("{id}/logout")]
+public async Task<IActionResult> Logout(int id)
+{
+    var engineer = await _context.FieldEngineers.FindAsync(id);
+    if (engineer == null) return NotFound("Engineer not found");
+
+    // ✅ Convert to PH local time
+    var phTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Singapore Standard Time");
+    var phNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, phTimeZone);
+
+    engineer.Status = "Inactive";
+    engineer.IsAvailable = false;
+    engineer.UpdatedAt = phNow;
+
+    await _context.SaveChangesAsync();
+    await _hubContext.Clients.All.SendAsync("ReceiveFieldEngineerUpdate", engineer);
+
+    return Ok(new
+    {
+        message = "Logged out successfully",
+        engineer.Status,
+        engineer.UpdatedAt
+    });
+}
 
 
         // [HttpPost("test-fcm")]
