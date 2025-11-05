@@ -426,34 +426,36 @@ public async Task<IActionResult> LoginSync(int id, [FromBody] FieldEngineer upda
     if (fieldEngineer == null)
         return NotFound("Field Engineer not found");
 
-    // ✅ Update basic login state
+    // ✅ Update login state but keep existing data
     fieldEngineer.Status = "Logged In";
     fieldEngineer.IsActive = true;
     fieldEngineer.IsAvailable = true;
-
-    // 🚫 Do NOT reset old location or time data
-    // Keep existing coordinates & address if already stored
     fieldEngineer.UpdatedAt = DateTime.UtcNow;
+
+    // 🕒 Ensure TimeIn is not null (prevents "Invalid Date")
     fieldEngineer.TimeIn ??= DateTime.UtcNow;
 
-    // 🧭 Only set placeholder if no previous address
+    // 🧭 Keep old address or placeholder
     if (string.IsNullOrWhiteSpace(fieldEngineer.CurrentAddress))
-    {
         fieldEngineer.CurrentAddress = "Awaiting GPS signal...";
-    }
 
     await _context.SaveChangesAsync();
 
-    // ✅ Only broadcast if we already have valid coordinates
-    if (fieldEngineer.CurrentLatitude != 0.0 && fieldEngineer.CurrentLongitude != 0.0)
+    // 🚀 Broadcast after a small delay (gives mobile time to send location)
+    _ = Task.Run(async () =>
     {
-        await _hubContext.Clients.All.SendAsync("ReceiveFieldEngineerUpdate", fieldEngineer);
-        Console.WriteLine($"📡 SignalR broadcast sent for FE #{fieldEngineer.Id} ({fieldEngineer.Status})");
-    }
-    else
-    {
-        Console.WriteLine($"⚠️ FE #{fieldEngineer.Id} logged in without coordinates — broadcast skipped");
-    }
+        await Task.Delay(TimeSpan.FromSeconds(5)); // delay 5s
+        using var scope = EcsFeMappingApi.Program.ServiceProvider!.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var hub = scope.ServiceProvider.GetRequiredService<IHubContext<NotificationHub>>();
+        var fe = await db.FieldEngineers.FindAsync(id);
+
+        if (fe != null)
+        {
+            await hub.Clients.All.SendAsync("ReceiveFieldEngineerUpdate", fe);
+            Console.WriteLine($"📡 Delayed SignalR broadcast sent for FE #{fe.Id} ({fe.Status})");
+        }
+    });
 
     Console.WriteLine($"🟢 FE #{fieldEngineer.Id} logged in: {fieldEngineer.Name} at {DateTime.UtcNow}");
 
@@ -492,6 +494,7 @@ public async Task<IActionResult> LoginSync(int id, [FromBody] FieldEngineer upda
 
     return Ok(new { message = "Login successful", fieldEngineer });
 }
+
 
 
 
