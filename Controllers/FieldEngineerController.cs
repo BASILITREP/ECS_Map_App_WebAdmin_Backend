@@ -420,85 +420,79 @@ namespace EcsFeMappingApi.Controllers
         }
 
         [HttpPost("{id}/login-sync")]
-        public async Task<IActionResult> LoginSync(int id, [FromBody] FieldEngineer updatedData)
-        {
-            var fieldEngineer = await _context.FieldEngineers.FindAsync(id);
-            if (fieldEngineer == null)
-                return NotFound("Field Engineer not found");
+public async Task<IActionResult> LoginSync(int id, [FromBody] FieldEngineer updatedData)
+{
+    var fieldEngineer = await _context.FieldEngineers.FindAsync(id);
+    if (fieldEngineer == null)
+        return NotFound("Field Engineer not found");
 
-            // ✅ Update basic login state
-            fieldEngineer.Status = "Logged In";
-            fieldEngineer.IsActive = true;
-            fieldEngineer.IsAvailable = true;
-            fieldEngineer.UpdatedAt = DateTime.UtcNow;
+    // ✅ Update basic login state
+    fieldEngineer.Status = "Logged In";
+    fieldEngineer.IsActive = true;
+    fieldEngineer.IsAvailable = true;
 
-            // 🕒 Ensure TimeIn placeholder to avoid "Invalid Date" on frontend
-    fieldEngineer.TimeIn ??= fieldEngineer.UpdatedAt;
+    // 🚫 Do NOT reset old location or time data
+    // Keep existing coordinates & address if already stored
+    fieldEngineer.UpdatedAt = DateTime.UtcNow;
+    fieldEngineer.TimeIn ??= DateTime.UtcNow;
 
-    // 🧭 Prevent "Unknown location" flash if user just logged in
-    if (fieldEngineer.CurrentLatitude == 0.0 && fieldEngineer.CurrentLongitude == 0.0)
+    // 🧭 Only set placeholder if no previous address
+    if (string.IsNullOrWhiteSpace(fieldEngineer.CurrentAddress))
     {
-        fieldEngineer.CurrentAddress ??= "Awaiting GPS signal...";
-        Console.WriteLine($"⚠️ FE #{fieldEngineer.Id} logged in without valid location — delaying broadcast");
+        fieldEngineer.CurrentAddress = "Awaiting GPS signal...";
     }
 
     await _context.SaveChangesAsync();
 
-    // ✅ Only broadcast if valid coordinates are already available
+    // ✅ Only broadcast if we already have valid coordinates
     if (fieldEngineer.CurrentLatitude != 0.0 && fieldEngineer.CurrentLongitude != 0.0)
     {
         await _hubContext.Clients.All.SendAsync("ReceiveFieldEngineerUpdate", fieldEngineer);
         Console.WriteLine($"📡 SignalR broadcast sent for FE #{fieldEngineer.Id} ({fieldEngineer.Status})");
     }
-
-            // ✅ Optional: Log to console for debugging
-            Console.WriteLine($"🟢 FE #{fieldEngineer.Id} logged in: {fieldEngineer.Name} at {DateTime.UtcNow}");
-
-            _ = Task.Run(async () =>
-{
-    try
+    else
     {
-        await Task.Delay(TimeSpan.FromSeconds(60));
+        Console.WriteLine($"⚠️ FE #{fieldEngineer.Id} logged in without coordinates — broadcast skipped");
+    }
 
-        // ✅ Create an independent service scope
-        using var scope = EcsFeMappingApi.Program.ServiceProvider!.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var firebase = scope.ServiceProvider.GetRequiredService<FirebaseMessagingService>();
+    Console.WriteLine($"🟢 FE #{fieldEngineer.Id} logged in: {fieldEngineer.Name} at {DateTime.UtcNow}");
 
-        var engineerCheck = await db.FieldEngineers.FirstOrDefaultAsync(f => f.Id == fieldEngineer.Id);
-        if (engineerCheck != null)
+    // 🔔 Reminder task (no change)
+    _ = Task.Run(async () =>
+    {
+        try
         {
-            var hasClockedIn = await db.AttendanceLogs
-                .AnyAsync(l => l.FieldEngineerId == engineerCheck.Id && l.TimeOut == null);
+            await Task.Delay(TimeSpan.FromSeconds(60));
+            using var scope = EcsFeMappingApi.Program.ServiceProvider!.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var firebase = scope.ServiceProvider.GetRequiredService<FirebaseMessagingService>();
 
-            if (!hasClockedIn)
+            var engineerCheck = await db.FieldEngineers.FirstOrDefaultAsync(f => f.Id == fieldEngineer.Id);
+            if (engineerCheck != null)
             {
-                Console.WriteLine($"⏰ FE #{engineerCheck.Id} has not clocked in after 60s — sending reminder standby...");
-                if (!string.IsNullOrEmpty(engineerCheck.FcmToken))
+                var hasClockedIn = await db.AttendanceLogs
+                    .AnyAsync(l => l.FieldEngineerId == engineerCheck.Id && l.TimeOut == null);
+
+                if (!hasClockedIn && !string.IsNullOrEmpty(engineerCheck.FcmToken))
                 {
                     await firebase.SendNotificationAsync(
                         "doroti-fe",
                         engineerCheck.FcmToken,
                         "Clock In Reminder ⏰",
-                        $"Hey {engineerCheck.FirstName}, don’t forget to clock in please!"
+                        $"Hey {engineerCheck.FirstName}, don’t forget to clock in!"
                     );
                 }
             }
-            else
-            {
-                Console.WriteLine($"✅ FE #{engineerCheck.Id} already clocked in, no reminder sent.");
-            }
         }
-    }
-    catch (Exception ex)
-    {
-        Console.WriteLine($"⚠️ 60-second clock-in reminder failed: {ex.Message}");
-    }
-});
-
-
-            return Ok(new { message = "Login successful", fieldEngineer });
+        catch (Exception ex)
+        {
+            Console.WriteLine($"⚠️ 60-second clock-in reminder failed: {ex.Message}");
         }
+    });
+
+    return Ok(new { message = "Login successful", fieldEngineer });
+}
+
 
 
 
