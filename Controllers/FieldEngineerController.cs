@@ -432,10 +432,24 @@ namespace EcsFeMappingApi.Controllers
             fieldEngineer.IsAvailable = true;
             fieldEngineer.UpdatedAt = DateTime.UtcNow;
 
-            await _context.SaveChangesAsync();
+            // 🕒 Ensure TimeIn placeholder to avoid "Invalid Date" on frontend
+    fieldEngineer.TimeIn ??= fieldEngineer.UpdatedAt;
 
-            // ✅ Send SignalR broadcast to web dashboard
-            await _hubContext.Clients.All.SendAsync("ReceiveFieldEngineerUpdate", fieldEngineer);
+    // 🧭 Prevent "Unknown location" flash if user just logged in
+    if (fieldEngineer.CurrentLatitude == 0.0 && fieldEngineer.CurrentLongitude == 0.0)
+    {
+        fieldEngineer.CurrentAddress ??= "Awaiting GPS signal...";
+        Console.WriteLine($"⚠️ FE #{fieldEngineer.Id} logged in without valid location — delaying broadcast");
+    }
+
+    await _context.SaveChangesAsync();
+
+    // ✅ Only broadcast if valid coordinates are already available
+    if (fieldEngineer.CurrentLatitude != 0.0 && fieldEngineer.CurrentLongitude != 0.0)
+    {
+        await _hubContext.Clients.All.SendAsync("ReceiveFieldEngineerUpdate", fieldEngineer);
+        Console.WriteLine($"📡 SignalR broadcast sent for FE #{fieldEngineer.Id} ({fieldEngineer.Status})");
+    }
 
             // ✅ Optional: Log to console for debugging
             Console.WriteLine($"🟢 FE #{fieldEngineer.Id} logged in: {fieldEngineer.Name} at {DateTime.UtcNow}");
