@@ -42,7 +42,7 @@ namespace EcsFeMappingApi.Services
         public Task StartAsync(CancellationToken cancellationToken)
         {
             _logger.LogInformation("Activity Processing Service is starting.");
-            _timer = new Timer(DoWork, null, TimeSpan.Zero, TimeSpan.FromSeconds(30));
+            _timer = new Timer(DoWork, null, TimeSpan.Zero, TimeSpan.FromMinutes(5));
             return Task.CompletedTask;
         }
 
@@ -117,9 +117,13 @@ namespace EcsFeMappingApi.Services
                         _logger.LogInformation($"🆕 Added {newEvents.Count} new events for FE #{engineerId}.");
                     }
 
-                    // ✅ Mark processed points (leave last few minutes unprocessed for continuity)
+                    // ✅ MERGE MUNA (BEFORE marking as processed)
+                    await MergeConsecutiveDriveEvents(engineerId, dbContext);
+                    await MergeConsecutiveStayEvents(engineerId, dbContext);
+
+                    // ✅ TAPOS NA LANG MAG-MARK NG IsProcessed = true (LAST STEP)
                     var nowUtc = DateTime.UtcNow;
-                    var keepWindowMinutes = 10; // keep last 3 mins open
+                    var keepWindowMinutes = 10;
                     int marked = 0, kept = 0;
 
                     foreach (var p in pointsToProcess)
@@ -139,10 +143,7 @@ namespace EcsFeMappingApi.Services
                     _logger.LogInformation($"✅ Finished FE #{engineerId}: marked {marked} points as processed, kept {kept} recent ones.");
 
 
-                    // ✅ Merge consecutive drives to reduce clutter
-                    await MergeConsecutiveDriveEvents(engineerId, dbContext);
-                    // ✅ Merge consecutive stays to reduce clutter
-                    await MergeConsecutiveStayEvents(engineerId, dbContext);
+                   
 
                     // ✅ Optional: Cleanup old processed points to save space
                     // var cleanupThreshold = DateTime.UtcNow.AddDays(-2);
@@ -168,7 +169,7 @@ namespace EcsFeMappingApi.Services
                                 // 🛑 Skip updating logged-in engineers
                                 if (engineer.Status == "Logged In")
                                     continue;
-                                        
+
                                 await hubContext.Clients.All.SendAsync("ReceiveFieldEngineerUpdate", engineer);
                                 _logger.LogInformation($"📡 Broadcasted live update for FE #{engineer.Id}: {engineer.CurrentLatitude},{engineer.CurrentLongitude}");
                             }
@@ -591,7 +592,7 @@ namespace EcsFeMappingApi.Services
                 }
             }
 
-            // finalize any remaining
+            // finalize a   ny remaining
             if (isDriving && drivePoints.Count >= MIN_TRIP_POINTS)
             {
                 var driveEvent = await CreateDriveEvent(drivePoints, engineerId, dbContext);
