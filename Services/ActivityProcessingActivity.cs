@@ -100,7 +100,6 @@ namespace EcsFeMappingApi.Services
                         .OrderBy(p => p.Timestamp)
                         .ToListAsync();
 
-                    // ✅ Skip if not enough data points for analysis
                     if (pointsToProcess.Count < 3)
                     {
                         _logger.LogInformation($"⏸️ Skipping FE #{engineerId}: only {pointsToProcess.Count} unprocessed points (need ≥3).");
@@ -109,19 +108,28 @@ namespace EcsFeMappingApi.Services
 
                     _logger.LogInformation($"🔍 Found {pointsToProcess.Count} unprocessed points for FE #{engineerId}.");
 
+                    // ✅ 1. Detect new events (but DON'T save yet)
                     var newEvents = await DetectEvents(pointsToProcess, engineerId, dbContext);
-
+                    
                     if (newEvents.Any())
                     {
+                        // ✅ 2. Add to context (tracked, but not saved)
                         await dbContext.ActivityEvents.AddRangeAsync(newEvents);
-                        _logger.LogInformation($"🆕 Added {newEvents.Count} new events for FE #{engineerId}.");
+                        _logger.LogInformation($"🆕 Prepared {newEvents.Count} new events for FE #{engineerId}.");
+                        
+                        // ✅ 3. FIRST SAVE - save raw events
+                        //await dbContext.SaveChangesAsync();
+                        
+                        // ✅ 4. NOW MERGE (this will remove duplicates)
+                        await MergeConsecutiveDriveEvents(engineerId, dbContext);
+                        await MergeConsecutiveStayEvents(engineerId, dbContext);
+                        
+                         await dbContext.SaveChangesAsync();
+
+                        _logger.LogInformation($"✅ Merge operations completed for FE #{engineerId}");
                     }
 
-                    // ✅ MERGE MUNA (BEFORE marking as processed)
-                    await MergeConsecutiveDriveEvents(engineerId, dbContext);
-                    await MergeConsecutiveStayEvents(engineerId, dbContext);
-
-                    // ✅ TAPOS NA LANG MAG-MARK NG IsProcessed = true (LAST STEP)
+                    // ✅ 5. Mark points as processed (LAST STEP)
                     var nowUtc = DateTime.UtcNow;
                     var keepWindowMinutes = 10;
                     int marked = 0, kept = 0;
@@ -142,16 +150,12 @@ namespace EcsFeMappingApi.Services
                     await dbContext.SaveChangesAsync();
                     _logger.LogInformation($"✅ Finished FE #{engineerId}: marked {marked} points as processed, kept {kept} recent ones.");
 
-
-                   
-
                     // ✅ Optional: Cleanup old processed points to save space
                     // var cleanupThreshold = DateTime.UtcNow.AddDays(-2);
                     // var oldPoints = dbContext.LocationPoints
                     // .Where(p => p.IsProcessed && p.Timestamp < cleanupThreshold);
                     // int deletedCount = await oldPoints.ExecuteDeleteAsync();
                     // _logger.LogInformation($"🧹 Cleaned up {deletedCount} old processed points for FE #{engineerId}.");
-
 
                     // ✅ Broadcast updated coordinates to web admin
                     try
@@ -409,13 +413,13 @@ namespace EcsFeMappingApi.Services
             //         const double MIN_TRIP_DISTANCE_KM = 0.01;   // 0.02
 
             // === FIELD MODE (REAL-WORLD USE) ===
-            const double STAY_RADIUS_METERS = 12;       // consider as same place if within 12 meters
-            const double MOVE_SPEED_THRESHOLD_KMH = 1.0; // minimum speed to start moving
+            const double STAY_RADIUS_METERS = 25;       //12 consider as same place if within 12 meters
+            const double MOVE_SPEED_THRESHOLD_KMH = 3.0; //1.0 minimum speed to start moving
             const double STOP_SPEED_THRESHOLD_KMH = 3.0; // threshold for slow/stationary
-            const int DRIVE_STOP_THRESHOLD_MIN = 2;      // must stop ≥4 mins to end a drive
-            const int STAY_MIN_DURATION_MIN = 1;         // must stay ≥1 min to count as stop
+            const int DRIVE_STOP_THRESHOLD_MIN = 5;      //2 must stop ≥4 mins to end a drive
+            const int STAY_MIN_DURATION_MIN = 3;         //1 must stay ≥1 min to count as stop
             const int MIN_TRIP_POINTS = 2;               // at least 2 valid points per drive
-            const double MIN_TRIP_DISTANCE_KM = 0.02;    // minimum trip distance ≈ 20 meters
+            const double MIN_TRIP_DISTANCE_KM = 0.1;    //0.02 minimum trip distance ≈ 20 meters
 
             // --- state variables ---
             bool isDriving = false;
@@ -502,13 +506,13 @@ namespace EcsFeMappingApi.Services
                                 {
                                     // avoid duplicate or near-identical drives
                                     bool isDuplicate = events.Any(e =>
-                                        e.Type == EventType.Drive &&
-                                        Math.Abs((e.EndTime - driveEvent.EndTime).TotalMinutes) < 2 &&
-                                        HaversineDistance(
-                                            new LocationPoint { Latitude = e.EndLatitude ?? 0, Longitude = e.EndLongitude ?? 0 },
-                                            new LocationPoint { Latitude = driveEvent.EndLatitude ?? 0, Longitude = driveEvent.EndLongitude ?? 0 }
-                                        ) * 1000 < 100
-                                    );
+    e.Type == EventType.Drive &&
+    Math.Abs((e.StartTime - driveEvent.StartTime).TotalMinutes) < 5 &&
+    HaversineDistance(
+        new LocationPoint { Latitude = e.StartLatitude ?? 0, Longitude = e.StartLongitude ?? 0 },
+        new LocationPoint { Latitude = driveEvent.StartLatitude ?? 0, Longitude = driveEvent.StartLongitude ?? 0 }
+    ) * 1000 < 200
+);
 
                                     if (!isDuplicate)
                                     {
@@ -624,16 +628,16 @@ namespace EcsFeMappingApi.Services
 
             // 🔁 merge duplicates
             events = events
-                .GroupBy(e => new
-                {
-                    e.Type,
-                    StartLat = Math.Round(e.StartLatitude ?? 0, 5),
-                    StartLon = Math.Round(e.StartLongitude ?? 0, 5),
-                    EndLat = Math.Round(e.EndLatitude ?? 0, 5),
-                    EndLon = Math.Round(e.EndLongitude ?? 0, 5)
-                })
-                .Select(g => g.First())
-                .ToList();
+    .GroupBy(e => new
+    {
+        e.Type,
+        StartLat = Math.Round(e.StartLatitude ?? 0, 4),
+        StartLon = Math.Round(e.StartLongitude ?? 0, 4),
+        EndLat = Math.Round(e.EndLatitude ?? 0, 4),
+        EndLon = Math.Round(e.EndLongitude ?? 0, 4)
+    })
+    .Select(g => g.OrderByDescending(x => x.DistanceKm ?? 0).First())
+    .ToList();
 
             _logger.LogInformation($"✅ Final total events for FE #{engineerId}: {events.Count}");
             return events;
@@ -754,10 +758,19 @@ namespace EcsFeMappingApi.Services
         //Merge drive events that are very close in time and location
         private async Task MergeConsecutiveDriveEvents(int engineerId, AppDbContext dbContext)
         {
-            var drives = await dbContext.ActivityEvents
+            // ✅ Get BOTH saved AND tracked (unsaved) events
+            var drives = dbContext.ActivityEvents
+                .Local // ← Gets tracked entities
                 .Where(e => e.FieldEngineerId == engineerId && e.Type == EventType.Drive)
-                .OrderBy(e => e.StartTime)
+                .ToList();
+
+            // ✅ Also load existing events from DB
+            var savedDrives = await dbContext.ActivityEvents
+                .Where(e => e.FieldEngineerId == engineerId && e.Type == EventType.Drive)
                 .ToListAsync();
+
+            // ✅ Combine and deduplicate
+            drives = drives.Union(savedDrives).OrderBy(e => e.StartTime).ToList();
 
             if (drives.Count < 2) return;
 
@@ -784,7 +797,7 @@ namespace EcsFeMappingApi.Services
                     current.DistanceKm = (current.DistanceKm ?? 0) + (next.DistanceKm ?? 0);
                     current.TopSpeedKmh = Math.Max(current.TopSpeedKmh ?? 0, next.TopSpeedKmh ?? 0);
 
-                    // Combine RoutePathJson if both exist
+                    // Combine RoutePathJson
                     try
                     {
                         var coordsA = string.IsNullOrWhiteSpace(current.RoutePathJson)
@@ -811,26 +824,30 @@ namespace EcsFeMappingApi.Services
                         _logger.LogWarning($"⚠️ Route merge failed: {ex.Message}");
                     }
 
-                    // Remove the next (merged) event
+                    // ✅ Remove 'next' (works for both tracked and saved entities)
                     dbContext.ActivityEvents.Remove(next);
-
-                    // Move the pointer back one to re-check newly merged block
                     drives.RemoveAt(i + 1);
                     i--;
                 }
             }
 
-            await dbContext.SaveChangesAsync();
+            // ✅ SaveChanges happens in ProcessActivities() after this method
             _logger.LogInformation($"✅ Completed drive merge for FE #{engineerId}");
         }
 
         //Merge stay events that are very close in time and location
         private async Task MergeConsecutiveStayEvents(int engineerId, AppDbContext dbContext)
         {
-            var stays = await dbContext.ActivityEvents
+            var stays = dbContext.ActivityEvents
+                .Local
                 .Where(e => e.FieldEngineerId == engineerId && e.Type == EventType.Stop)
-                .OrderBy(e => e.StartTime)
+                .ToList();
+
+            var savedStays = await dbContext.ActivityEvents
+                .Where(e => e.FieldEngineerId == engineerId && e.Type == EventType.Stop)
                 .ToListAsync();
+
+            stays = stays.Union(savedStays).OrderBy(e => e.StartTime).ToList();
 
             if (stays.Count < 2) return;
 
@@ -839,38 +856,30 @@ namespace EcsFeMappingApi.Services
                 var current = stays[i];
                 var next = stays[i + 1];
 
-                // ✅ Compute gap and distance
                 double gapMinutes = (next.StartTime - current.EndTime).TotalMinutes;
                 double gapDistance = HaversineDistance(
                     new LocationPoint { Latitude = current.EndLatitude ?? current.StartLatitude ?? 0, Longitude = current.EndLongitude ?? current.StartLongitude ?? 0 },
                     new LocationPoint { Latitude = next.StartLatitude ?? 0, Longitude = next.StartLongitude ?? 0 }
-                ) * 1000; // meters
+                ) * 1000;
 
-                // ✅ Merge condition: within 5 minutes gap, within 50 meters radius
                 if (gapMinutes <= 5 && gapDistance <= 50)
                 {
                     _logger.LogInformation($"🔁 Merging consecutive stays (Gap={gapMinutes:F1}min, Dist={gapDistance:F1}m)");
 
-                    // Extend the current stay’s end time and duration
                     current.EndTime = next.EndTime;
                     current.DurationMinutes += next.DurationMinutes;
 
-                    // Preserve location info if current is missing
                     if (string.IsNullOrWhiteSpace(current.LocationName) && !string.IsNullOrWhiteSpace(next.LocationName))
                         current.LocationName = next.LocationName;
                     if (string.IsNullOrWhiteSpace(current.Address) && !string.IsNullOrWhiteSpace(next.Address))
                         current.Address = next.Address;
 
-                    // Delete the merged record
                     dbContext.ActivityEvents.Remove(next);
-
-                    // Move pointer back one step to recheck merged block
                     stays.RemoveAt(i + 1);
                     i--;
                 }
             }
 
-            await dbContext.SaveChangesAsync();
             _logger.LogInformation($"✅ Completed stay merge for FE #{engineerId}");
         }
 
