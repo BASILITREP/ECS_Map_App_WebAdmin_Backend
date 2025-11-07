@@ -106,85 +106,47 @@ namespace EcsFeMappingApi.Services
                         continue;
                     }
 
-                    _logger.LogInformation($"🔍 Found {pointsToProcess.Count} unprocessed points for FE #{engineerId}.");
+                    // ✅ CHECK IF STILL DRIVING (Life360 approach)
+                    var latestPoint = pointsToProcess.Last();
+                    var timeSinceLastPoint = DateTime.UtcNow - latestPoint.Timestamp;
+                    
+                    if (timeSinceLastPoint.TotalMinutes < 15)
+                    {
+                        var speedKmh = (latestPoint.Speed ?? 0) * 3.6;
+                        
+                        if (speedKmh > 3.0)
+                        {
+                            _logger.LogInformation($"⏸️ FE #{engineerId} still driving ({speedKmh:F1} km/h) - waiting for trip completion");
+                            continue; // ← SKIP PROCESSING, wait for next cycle
+                        }
+                    }
 
-                    // ✅ 1. Detect new events (but DON'T save yet)
+                    _logger.LogInformation($"🔍 Found {pointsToProcess.Count} unprocessed points for FE #{engineerId}. Trip completed, processing...");
+
+                    // ✅ NOW SAFE TO PROCESS (engineer has stopped)
                     var newEvents = await DetectEvents(pointsToProcess, engineerId, dbContext);
                     
                     if (newEvents.Any())
                     {
-                        // ✅ 2. Add to context (tracked, but not saved)
                         await dbContext.ActivityEvents.AddRangeAsync(newEvents);
                         _logger.LogInformation($"🆕 Prepared {newEvents.Count} new events for FE #{engineerId}.");
                         
-                        // ✅ 3. FIRST SAVE - save raw events
-                        //await dbContext.SaveChangesAsync();
-                        
-                        // ✅ 4. NOW MERGE (this will remove duplicates)
                         await MergeConsecutiveDriveEvents(engineerId, dbContext);
                         await MergeConsecutiveStayEvents(engineerId, dbContext);
                         
-                         await dbContext.SaveChangesAsync();
-
+                        await dbContext.SaveChangesAsync();
                         _logger.LogInformation($"✅ Merge operations completed for FE #{engineerId}");
                     }
 
-                    // ✅ 5. Mark points as processed (LAST STEP)
-                    var nowUtc = DateTime.UtcNow;
-                    var keepWindowMinutes = 10;
-                    int marked = 0, kept = 0;
-
+                    // ✅ Mark as processed
                     foreach (var p in pointsToProcess)
                     {
-                        if (p.Timestamp <= nowUtc.AddMinutes(-keepWindowMinutes))
-                        {
-                            p.IsProcessed = true;
-                            marked++;
-                        }
-                        else
-                        {
-                            kept++;
-                        }
+                        p.IsProcessed = true;
                     }
 
                     await dbContext.SaveChangesAsync();
-                    _logger.LogInformation($"✅ Finished FE #{engineerId}: marked {marked} points as processed, kept {kept} recent ones.");
-
-                    // ✅ Optional: Cleanup old processed points to save space
-                    // var cleanupThreshold = DateTime.UtcNow.AddDays(-2);
-                    // var oldPoints = dbContext.LocationPoints
-                    // .Where(p => p.IsProcessed && p.Timestamp < cleanupThreshold);
-                    // int deletedCount = await oldPoints.ExecuteDeleteAsync();
-                    // _logger.LogInformation($"🧹 Cleaned up {deletedCount} old processed points for FE #{engineerId}.");
-
-                    // ✅ Broadcast updated coordinates to web admin
-                    try
-                    {
-                        var engineer = await dbContext.FieldEngineers.FindAsync(engineerId);
-                        if (engineer != null)
-                        {
-                            using (var innerScope = _serviceProvider.CreateScope())
-                            {
-                                var hubContext = innerScope.ServiceProvider
-                                    .GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<EcsFeMappingApi.Services.NotificationHub>>();
-
-
-                                //Skip updating logged-in engineers
-                                // 🛑 Skip updating logged-in engineers
-                                if (engineer.Status == "Logged In")
-                                    continue;
-
-                                await hubContext.Clients.All.SendAsync("ReceiveFieldEngineerUpdate", engineer);
-                                _logger.LogInformation($"📡 Broadcasted live update for FE #{engineer.Id}: {engineer.CurrentLatitude},{engineer.CurrentLongitude}");
-                            }
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError($"❌ SignalR broadcast failed: {ex.Message}");
-                    }
+                    _logger.LogInformation($"✅ Finished FE #{engineerId}: marked {pointsToProcess.Count} points as processed.");
                 }
-
             }
         }
 

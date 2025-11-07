@@ -9,6 +9,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.SignalR;
 using EcsFeMappingApi.Services;
 using System.Text.Json;
+using Microsoft.Extensions.Logging; // ✅ ADD THIS
 
 namespace EcsFeMappingApi.Controllers
 {
@@ -18,14 +19,19 @@ namespace EcsFeMappingApi.Controllers
     {
         private readonly AppDbContext _context;
         private readonly IHubContext<NotificationHub> _hubContext;
-
         private readonly FirebaseMessagingService _firebaseService;
+        private readonly ILogger<FieldEngineerController> _logger; // ✅ ADD THIS
 
-        public FieldEngineerController(AppDbContext context, IHubContext<NotificationHub> hubContext, FirebaseMessagingService firebaseService)
+        public FieldEngineerController(
+            AppDbContext context, 
+            IHubContext<NotificationHub> hubContext, 
+            FirebaseMessagingService firebaseService,
+            ILogger<FieldEngineerController> logger) // ✅ ADD THIS
         {
             _context = context;
             _hubContext = hubContext;
             _firebaseService = firebaseService;
+            _logger = logger; // ✅ ADD THIS
         }
 
 
@@ -490,140 +496,143 @@ namespace EcsFeMappingApi.Controllers
 
 
         // POST: api/FieldEngineer/{id}/clockin
-[HttpPost("{id}/clockin")]
-public async Task<IActionResult> ClockIn(int id)
-{
-    var engineer = await _context.FieldEngineers.FindAsync(id);
-    if (engineer == null) return NotFound("Engineer not found");
+        [HttpPost("{id}/clockin")]
+        public async Task<IActionResult> ClockIn(int id)
+        {
+            var engineer = await _context.FieldEngineers.FindAsync(id);
+            if (engineer == null) return NotFound("Engineer not found");
 
-    // Prevent double Time In without Time Out
-    var existingLog = await _context.AttendanceLogs
-        .Where(l => l.FieldEngineerId == id && l.TimeOut == null)
-        .FirstOrDefaultAsync();
+            // Prevent double Time In without Time Out
+            var existingLog = await _context.AttendanceLogs
+                .Where(l => l.FieldEngineerId == id && l.TimeOut == null)
+                .FirstOrDefaultAsync();
 
-    if (existingLog != null)
-        return BadRequest("Already clocked in, please clock out first.");
+            if (existingLog != null)
+                return BadRequest("Already clocked in, please clock out first.");
 
-    // ✅ Use PH (UTC+8) time instead of UTC
-    var phTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Singapore Standard Time");
-    var phNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, phTimeZone);
+            // ✅ Use PH (UTC+8) time instead of UTC
+            var phTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Singapore Standard Time");
+            var phNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, phTimeZone);
 
-    var log = new AttendanceLogModel
-    {
-        FieldEngineerId = id,
-        TimeIn = phNow,
-        Location = engineer.CurrentAddress
-    };
+            var log = new AttendanceLogModel
+            {
+                FieldEngineerId = id,
+                TimeIn = phNow,
+                Location = engineer.CurrentAddress
+            };
 
-    _context.AttendanceLogs.Add(log);
+            _context.AttendanceLogs.Add(log);
 
-    engineer.TimeIn = log.TimeIn; // Mirror TimeIn
-    engineer.Status = "Active";
-    engineer.UpdatedAt = phNow;
-    await _context.SaveChangesAsync();
+            engineer.TimeIn = log.TimeIn; // Mirror TimeIn
+            engineer.Status = "Active";
+            engineer.UpdatedAt = phNow;
+            await _context.SaveChangesAsync();
 
-    // 📡 Notify dashboard in real-time
-    await _hubContext.Clients.All.SendAsync("ReceiveFieldEngineerUpdate", engineer);
+            // 📡 Notify dashboard in real-time
+            await _hubContext.Clients.All.SendAsync("ReceiveFieldEngineerUpdate", engineer);
 
-    return Ok(new { message = "Clocked in successfully", log });
-}
+            return Ok(new { message = "Clocked in successfully", log });
+        }
 
 
-// POST: api/FieldEngineer/{id}/clockout
-[HttpPost("{id}/clockout")]
-public async Task<IActionResult> ClockOut(int id)
-{
-    var engineer = await _context.FieldEngineers.FindAsync(id);
-    if (engineer == null) return NotFound("Engineer not found");
+        // POST: api/FieldEngineer/{id}/clockout
+        [HttpPost("{id}/clockout")]
+        public async Task<IActionResult> ClockOut(int id)
+        {
+            var engineer = await _context.FieldEngineers.FindAsync(id);
+            if (engineer == null) return NotFound("Engineer not found");
 
-    var log = await _context.AttendanceLogs
-        .Where(l => l.FieldEngineerId == id && l.TimeOut == null)
-        .OrderByDescending(l => l.TimeIn)
-        .FirstOrDefaultAsync();
+            var log = await _context.AttendanceLogs
+                .Where(l => l.FieldEngineerId == id && l.TimeOut == null)
+                .OrderByDescending(l => l.TimeIn)
+                .FirstOrDefaultAsync();
 
-    if (log == null)
-        return BadRequest("No active Time In found for this engineer.");
+            if (log == null)
+                return BadRequest("No active Time In found for this engineer.");
 
-    // ✅ Use PH local time for clock-out
-    var phTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Singapore Standard Time");
-    var phNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, phTimeZone);
+            // ✅ Use PH local time for clock-out
+            var phTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Singapore Standard Time");
+            var phNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, phTimeZone);
 
-    // ✅ End the current session
-    log.TimeOut = phNow;
+            // ✅ End the current session
+            log.TimeOut = phNow;
 
-    // ✅ Update FieldEngineer properties
-    engineer.Status = "Off-work";
-    engineer.IsAvailable = false;
-    engineer.UpdatedAt = phNow;
+            // ✅ Update FieldEngineer properties
+            engineer.Status = "Off-work";
+            engineer.IsAvailable = false;
+            engineer.UpdatedAt = phNow;
 
-    await _context.SaveChangesAsync();
+            await _context.SaveChangesAsync();
 
-    // ✅ 🔥 Real-time update to web admin via SignalR
-    await _hubContext.Clients.All.SendAsync("ReceiveFieldEngineerUpdate", engineer);
+            // ✅ 🔥 Real-time update to web admin via SignalR
+            await _hubContext.Clients.All.SendAsync("ReceiveFieldEngineerUpdate", engineer);
 
-    return Ok(new
-    {
-        message = "Clocked out successfully",
-        log,
-        engineer.Status,
-        engineer.UpdatedAt
-    });
-}
+            return Ok(new
+            {
+                message = "Clocked out successfully",
+                log,
+                engineer.Status,
+                engineer.UpdatedAt
+            });
+        }
 
 
 
         // GET: api/FieldEngineer/{id}/attendance
-[HttpGet("{id}/attendance")]
-public async Task<IActionResult> GetAttendanceLogs(int id)
-{
-    var logs = await _context.AttendanceLogs
-        .Where(l => l.FieldEngineerId == id)
-        .OrderByDescending(l => l.TimeIn)
-        .ToListAsync();
+        [HttpGet("{id}/attendance")]
+        public async Task<IActionResult> GetAttendanceLogs(int id)
+        {
+            var logs = await _context.AttendanceLogs
+                .Where(l => l.FieldEngineerId == id)
+                .OrderByDescending(l => l.TimeIn)
+                .ToListAsync();
 
-    // ✅ Convert each log’s time to PH local time before sending
-    var phTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Singapore Standard Time");
+            // ✅ Convert each log’s time to PH local time before sending
+            var phTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Singapore Standard Time");
 
-    var localizedLogs = logs.Select(l => new
-    {
-        l.Id,
-        l.FieldEngineerId,
-        TimeIn = TimeZoneInfo.ConvertTimeFromUtc(l.TimeIn, phTimeZone),
-        TimeOut = l.TimeOut.HasValue
-            ? TimeZoneInfo.ConvertTimeFromUtc(l.TimeOut.Value, phTimeZone)
-            : (DateTime?)null,
-        l.Location
-    });
+            var localizedLogs = logs.Select(l => new
+            {
+                l.Id,
+                l.FieldEngineerId,
+                TimeIn = TimeZoneInfo.ConvertTimeFromUtc(l.TimeIn, phTimeZone),
+                TimeOut = l.TimeOut.HasValue
+                    ? TimeZoneInfo.ConvertTimeFromUtc(l.TimeOut.Value, phTimeZone)
+                    : (DateTime?)null,
+                l.Location
+            });
 
-    return Ok(localizedLogs);
-}
+            return Ok(localizedLogs);
+        }
 
 
-// POST: api/FieldEngineer/{id}/logout
-[HttpPost("{id}/logout")]
-public async Task<IActionResult> Logout(int id)
-{
-    var engineer = await _context.FieldEngineers.FindAsync(id);
-    if (engineer == null) return NotFound("Engineer not found");
+        // POST: api/FieldEngineer/{id}/logout
+        [HttpPost("{id}/logout")]
+        public async Task<IActionResult> Logout(int id)
+        {
+            var engineer = await _context.FieldEngineers.FindAsync(id);
+            if (engineer == null) return NotFound("Engineer not found");
 
-    // ✅ Convert to PH local time
-    var phTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Singapore Standard Time");
-    var phNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, phTimeZone);
+            // ✅ Convert to PH local time
+            var phTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Singapore Standard Time");
+            var phNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, phTimeZone);
 
-    engineer.Status = "Inactive";
-    engineer.IsAvailable = false;
-    engineer.UpdatedAt = phNow;
+            engineer.Status = "Inactive";
+            engineer.IsAvailable = false;
+            engineer.UpdatedAt = phNow;
 
-    await _context.SaveChangesAsync();
-    await _hubContext.Clients.All.SendAsync("ReceiveFieldEngineerUpdate", engineer);
+            await _context.SaveChangesAsync();
+            await _hubContext.Clients.All.SendAsync("ReceiveFieldEngineerUpdate", engineer);
 
-    return Ok(new
-    {
-        message = "Logged out successfully",
-        engineer.Status,
-        engineer.UpdatedAt
-    });
-}
+            return Ok(new
+            {
+                message = "Logged out successfully",
+                engineer.Status,
+                engineer.UpdatedAt
+            });
+        }
+
+
+        
 
 
         // [HttpPost("test-fcm")]
@@ -646,6 +655,103 @@ public async Task<IActionResult> Logout(int id)
         //         return StatusCode(500, new { error = ex.Message });
         //     }
         // }
+        
+        // GET: api/FieldEngineer/{engineerId}/history?minStayMinutes=10
+        [HttpGet("{engineerId}/history")]
+        public async Task<ActionResult<IEnumerable<ActivityEvent>>> GetActivityHistory(
+            int engineerId,
+            [FromQuery] int? minStayMinutes = null)
+        {
+            try
+            {
+                // ✅ Check if engineer exists
+                var engineerExists = await _context.FieldEngineers.AnyAsync(fe => fe.Id == engineerId);
+                if (!engineerExists)
+                {
+                    return NotFound($"Field engineer with ID {engineerId} not found.");
+                }
+
+                IQueryable<ActivityEvent> query = _context.ActivityEvents
+                    .Where(e => e.FieldEngineerId == engineerId)
+                    .OrderByDescending(e => e.StartTime);
+
+                // ✅ FILTER LOGIC: Keep drives that lead TO valid stays
+                if (minStayMinutes.HasValue && minStayMinutes.Value > 0)
+                {
+                    // Get all valid stay IDs (stays >= minStayMinutes)
+                    var validStayIds = await query
+                        .Where(e => e.Type == EventType.Stop && e.DurationMinutes >= minStayMinutes.Value)
+                        .Select(e => e.Id)
+                        .ToListAsync();
+
+                    // Get all valid stays
+                    var validStays = await query
+                        .Where(e => validStayIds.Contains(e.Id))
+                        .ToListAsync();
+
+                    // Get drives that END near a valid stay (within 250 meters)
+                    var filteredDrives = new List<ActivityEvent>();
+                    var allDrives = await query
+                        .Where(e => e.Type == EventType.Drive)
+                        .ToListAsync();
+
+                    foreach (var drive in allDrives)
+                    {
+                        // Check if this drive ends near ANY valid stay
+                        bool endsAtValidStay = validStays.Any(stay =>
+                        {
+                            if (!drive.EndLatitude.HasValue || !drive.EndLongitude.HasValue ||
+                                !stay.StartLatitude.HasValue || !stay.StartLongitude.HasValue)
+                                return false;
+
+                            // Calculate distance between drive end and stay start (Haversine formula)
+                            double R = 6371000; // Earth radius in meters
+                            double lat1 = drive.EndLatitude.Value * Math.PI / 180;
+                            double lat2 = stay.StartLatitude.Value * Math.PI / 180;
+                            double deltaLat = (stay.StartLatitude.Value - drive.EndLatitude.Value) * Math.PI / 180;
+                            double deltaLon = (stay.StartLongitude.Value - drive.EndLongitude.Value) * Math.PI / 180;
+
+                            double a = Math.Sin(deltaLat / 2) * Math.Sin(deltaLat / 2) +
+                                    Math.Cos(lat1) * Math.Cos(lat2) *
+                                    Math.Sin(deltaLon / 2) * Math.Sin(deltaLon / 2);
+                            double c = 2 * Math.Atan2(Math.Sqrt(a), Math.Sqrt(1 - a));
+                            double distance = R * c;
+
+                            // Consider "connected" if within 250 meters
+                            return distance <= 250;
+                        });
+
+                        if (endsAtValidStay)
+                        {
+                            filteredDrives.Add(drive);
+                        }
+                    }
+
+                    // Combine filtered drives + valid stays
+                    var filteredEvents = filteredDrives
+                        .Cast<ActivityEvent>()
+                        .Concat(validStays)
+                        .OrderBy(e => e.StartTime)
+                        .ToList();
+
+                    _logger.LogInformation(
+                        $"✅ Filtered to {filteredEvents.Count} events (stays ≥{minStayMinutes}min) for FE #{engineerId}"
+                    );
+
+                    return Ok(filteredEvents);
+                }
+
+                // No filter: return all activities
+                var activities = await query.ToListAsync();
+                _logger.LogInformation($"✅ Fetched {activities.Count} activities for FE #{engineerId}");
+                return Ok(activities);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"❌ Error fetching activity history for FE #{engineerId}");
+                return StatusCode(500, "Internal server error");
+            }
+        }
 
 
 
