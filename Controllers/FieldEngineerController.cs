@@ -660,91 +660,113 @@ namespace EcsFeMappingApi.Controllers
         [HttpGet("{engineerId}/history")]
         public async Task<ActionResult<IEnumerable<ActivityEvent>>> GetActivityHistory(
             int engineerId,
-            [FromQuery] int? minStayMinutes = null)
+            [FromQuery] int? minStayMinutes = null,
+            [FromQuery] DateTime? startDate = null,
+            [FromQuery] DateTime? endDate = null)
         {
             try
             {
-                // ✅ Check if engineer exists
                 var engineerExists = await _context.FieldEngineers.AnyAsync(fe => fe.Id == engineerId);
                 if (!engineerExists)
                 {
                     return NotFound($"Field engineer with ID {engineerId} not found.");
                 }
 
+                var phTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Singapore Standard Time");
+                var nowPh = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, phTimeZone);
+
                 IQueryable<ActivityEvent> query = _context.ActivityEvents
-                    .Where(e => e.FieldEngineerId == engineerId)
-                    .OrderByDescending(e => e.StartTime);
+                    .Where(e => e.FieldEngineerId == engineerId);
 
-                // ✅ FILTER LOGIC: Keep drives that lead TO valid stays
-                if (minStayMinutes.HasValue && minStayMinutes.Value > 0)
+                // ✅ Apply date range filter
+                if (startDate.HasValue)
                 {
-                    // Get all valid stay IDs (stays >= minStayMinutes)
-                    var validStayIds = await query
-                        .Where(e => e.Type == EventType.Stop && e.DurationMinutes >= minStayMinutes.Value)
-                        .Select(e => e.Id)
-                        .ToListAsync();
+                    var startDateUtc = TimeZoneInfo.ConvertTimeToUtc(startDate.Value.Date, phTimeZone);
+                    query = query.Where(e => e.StartTime >= startDateUtc);
+                }
 
-                    // Get all valid stays
-                    var validStays = await query
-                        .Where(e => validStayIds.Contains(e.Id))
-                        .ToListAsync();
+                if (endDate.HasValue)
+                {
+                    var endDateUtc = TimeZoneInfo.ConvertTimeToUtc(endDate.Value.Date.AddDays(1), phTimeZone);
+                    query = query.Where(e => e.StartTime < endDateUtc);
+                }
 
-                    // Get drives that END near a valid stay (within 250 meters)
-                    var filteredDrives = new List<ActivityEvent>();
-                    var allDrives = await query
-                        .Where(e => e.Type == EventType.Drive)
-                        .ToListAsync();
+                // ✅ Default to TODAY if no dates specified
+                if (!startDate.HasValue && !endDate.HasValue)
+                {
+                    var todayPh = nowPh.Date;
+                    var tomorrowPh = todayPh.AddDays(1);
+                    var todayUtc = TimeZoneInfo.ConvertTimeToUtc(todayPh, phTimeZone);
+                    var tomorrowUtc = TimeZoneInfo.ConvertTimeToUtc(tomorrowPh, phTimeZone);
+                    
+                    query = query.Where(e => e.StartTime >= todayUtc && e.StartTime < tomorrowUtc);
+                }
 
-                    foreach (var drive in allDrives)
-                    {
-                        // Check if this drive ends near ANY valid stay
-                        bool endsAtValidStay = validStays.Any(stay =>
-                        {
-                            if (!drive.EndLatitude.HasValue || !drive.EndLongitude.HasValue ||
-                                !stay.StartLatitude.HasValue || !stay.StartLongitude.HasValue)
-                                return false;
+                var allEvents = await query.OrderBy(e => e.StartTime).ToListAsync();
 
-                            // Calculate distance between drive end and stay start (Haversine formula)
-                            double R = 6371000; // Earth radius in meters
-                            double lat1 = drive.EndLatitude.Value * Math.PI / 180;
-                            double lat2 = stay.StartLatitude.Value * Math.PI / 180;
-                            double deltaLat = (stay.StartLatitude.Value - drive.EndLatitude.Value) * Math.PI / 180;
-                            double deltaLon = (stay.StartLongitude.Value - drive.EndLongitude.Value) * Math.PI / 180;
+                // ✅ If NO stay filter, return all events
+                if (!minStayMinutes.HasValue || minStayMinutes.Value <= 0)
+                {
+                    _logger.LogInformation($"✅ Fetched {allEvents.Count} activities (no stay filter) for FE #{engineerId}");
+                    return Ok(allEvents);
+                }
 
-                            double a = Math.Sin(deltaLat / 2) * Math.Sin(deltaLat / 2) +
-                                    Math.Cos(lat1) * Math.Cos(lat2) *
-                                    Math.Sin(deltaLon / 2) * Math.Sin(deltaLon / 2);
-                            double c = 2 * Math.Atan2(Math.Sqrt(a), Math.Sqrt(1 - a));
-                            double distance = R * c;
+                // 🔥 NEW LOGIC: Clock-in point (Point A) is ALWAYS included
+                var clockInPoint = allEvents
+                    .Where(e => e.Type == EventType.Stop)
+                    .OrderBy(e => e.StartTime)
+                    .FirstOrDefault();
 
-                            // Consider "connected" if within 250 meters
-                            return distance <= 250;
-                        });
+                if (clockInPoint == null)
+                {
+                    _logger.LogWarning($"⚠️ No clock-in point found for FE #{engineerId}");
+                    return Ok(new List<ActivityEvent>());
+                }
 
-                        if (endsAtValidStay)
-                        {
-                            filteredDrives.Add(drive);
-                        }
-                    }
+                // ✅ Filter destination stays (Points B, C, D...) by duration
+                var validDestinationStays = allEvents
+                    .Where(e => e.Type == EventType.Stop && 
+                               e.Id != clockInPoint.Id && // Exclude clock-in point from filter
+                               e.DurationMinutes >= minStayMinutes.Value)
+                    .OrderBy(e => e.StartTime)
+                    .ToList();
 
-                    // Combine filtered drives + valid stays
-                    var filteredEvents = filteredDrives
-                        .Cast<ActivityEvent>()
-                        .Concat(validStays)
+                if (validDestinationStays.Count == 0)
+                {
+                    _logger.LogInformation($"⚠️ No destination stays ≥{minStayMinutes}min found for FE #{engineerId}");
+                    // Return only clock-in point if no valid destinations
+                    return Ok(new List<ActivityEvent> { clockInPoint });
+                }
+
+                // 🚗 Build the result: Clock-in + Drives + Valid Destination Stays
+                var result = new List<ActivityEvent> { clockInPoint };
+                ActivityEvent? lastStay = clockInPoint;
+
+                foreach (var targetStay in validDestinationStays)
+                {
+                    // Get drives between last stay and current target stay
+                    var driveBetween = allEvents
+                        .Where(e => e.Type == EventType.Drive &&
+                                   e.StartTime >= (lastStay?.EndTime ?? DateTime.MinValue) &&
+                                   e.EndTime <= targetStay.StartTime)
                         .OrderBy(e => e.StartTime)
                         .ToList();
 
-                    _logger.LogInformation(
-                        $"✅ Filtered to {filteredEvents.Count} events (stays ≥{minStayMinutes}min) for FE #{engineerId}"
-                    );
-
-                    return Ok(filteredEvents);
+                    result.AddRange(driveBetween);
+                    result.Add(targetStay);
+                    
+                    lastStay = targetStay;
                 }
 
-                // No filter: return all activities
-                var activities = await query.ToListAsync();
-                _logger.LogInformation($"✅ Fetched {activities.Count} activities for FE #{engineerId}");
-                return Ok(activities);
+                var finalResult = result
+                    .OrderBy(e => e.StartTime)
+                    .Distinct()
+                    .ToList();
+
+                _logger.LogInformation($"✅ Filtered to {finalResult.Count} events (stay ≥{minStayMinutes}min filter) for FE #{engineerId}");
+                _logger.LogInformation($"   Clock-in: {clockInPoint.Address}, Valid destinations: {validDestinationStays.Count}");
+
+                return Ok(finalResult);
             }
             catch (Exception ex)
             {
