@@ -416,7 +416,7 @@ namespace EcsFeMappingApi.Services
             const double STAY_RADIUS_METERS = 25;       //12 consider as same place if within 12 meters
             const double MOVE_SPEED_THRESHOLD_KMH = 3.0; //1.0 minimum speed to start moving
             const double STOP_SPEED_THRESHOLD_KMH = 3.0; // threshold for slow/stationary
-            const int DRIVE_STOP_THRESHOLD_MIN = 5;      //2 must stop ≥4 mins to end a drive
+            const int DRIVE_STOP_THRESHOLD_MIN = 10;      //2 must stop ≥4 mins to end a drive
             const int STAY_MIN_DURATION_MIN = 3;         //1 must stay ≥1 min to count as stop
             const int MIN_TRIP_POINTS = 2;               // at least 2 valid points per drive
             const double MIN_TRIP_DISTANCE_KM = 0.1;    //0.02 minimum trip distance ≈ 20 meters
@@ -502,33 +502,76 @@ namespace EcsFeMappingApi.Services
                                 // drive ends
                                 var driveEvent = await CreateDriveEvent(drivePoints, engineerId, dbContext);
 
+                                // IMPROVED DUPLICATE DETECTION
                                 if (driveEvent != null && driveEvent.DistanceKm >= MIN_TRIP_DISTANCE_KM)
                                 {
-                                    // avoid duplicate or near-identical drives
-                                    bool isDuplicate = events.Any(e =>
-    e.Type == EventType.Drive &&
-    Math.Abs((e.StartTime - driveEvent.StartTime).TotalMinutes) < 5 &&
-    HaversineDistance(
-        new LocationPoint { Latitude = e.StartLatitude ?? 0, Longitude = e.StartLongitude ?? 0 },
-        new LocationPoint { Latitude = driveEvent.StartLatitude ?? 0, Longitude = driveEvent.StartLongitude ?? 0 }
-    ) * 1000 < 200
-);
+                                    bool isDuplicate = false;
+                                    ActivityEvent? duplicateToReplace = null;
 
-                                    if (!isDuplicate)
+                                    foreach (var existingEvent in events.Where(e => e.Type == EventType.Drive))
+                                    {
+                                        // Check time overlap
+                                        bool timeOverlap = Math.Abs((existingEvent.StartTime - driveEvent.StartTime).TotalMinutes) < 10;
+                                        if (!timeOverlap) continue;
+
+                                        // Check start location distance
+                                        double startDist = HaversineDistance(
+                                            new LocationPoint { Latitude = existingEvent.StartLatitude ?? 0, Longitude = existingEvent.StartLongitude ?? 0 },
+                                            new LocationPoint { Latitude = driveEvent.StartLatitude ?? 0, Longitude = driveEvent.StartLongitude ?? 0 }
+                                        ) * 1000;
+
+                                        // Check end location distance
+                                        double endDist = HaversineDistance(
+                                            new LocationPoint { Latitude = existingEvent.EndLatitude ?? 0, Longitude = existingEvent.EndLongitude ?? 0 },
+                                            new LocationPoint { Latitude = driveEvent.EndLatitude ?? 0, Longitude = driveEvent.EndLongitude ?? 0 }
+                                        ) * 1000;
+
+                                        // ✅ Fragment detection: Same start, different end
+                                        if (startDist < 200 && endDist > 200)
+                                        {
+                                            if (driveEvent.DistanceKm > existingEvent.DistanceKm)
+                                            {
+                                                // New event is longer - replace old fragment
+                                                duplicateToReplace = existingEvent;
+                                                _logger.LogInformation($"🔄 Will replace shorter drive ({existingEvent.DistanceKm:F2} km) with longer drive ({driveEvent.DistanceKm:F2} km)");
+                                                break;
+                                            }
+                                            else
+                                            {
+                                                // Existing event is longer - skip new fragment
+                                                isDuplicate = true;
+                                                _logger.LogInformation($"⚠️ Skipped shorter fragment drive ({driveEvent.DistanceKm:F2} km) - already have longer drive ({existingEvent.DistanceKm:F2} km)");
+                                                break;
+                                            }
+                                        }
+
+                                        // ✅ Exact duplicate: Same start + end locations
+                                        if (startDist < 200 && endDist < 200)
+                                        {
+                                            isDuplicate = true;
+                                            _logger.LogInformation($"⚠️ Skipped exact duplicate drive");
+                                            break;
+                                        }
+                                    }
+
+                                    // Apply replacement or addition
+                                    if (duplicateToReplace != null)
+                                    {
+                                        events.Remove(duplicateToReplace);
+                                        events.Add(driveEvent);
+                                        _logger.LogInformation($"✅ Replaced fragment with complete drive ({driveEvent.DistanceKm:F2} km)");
+                                    }
+                                    else if (!isDuplicate)
                                     {
                                         events.Add(driveEvent);
                                         _logger.LogInformation($"🏁 Drive completed: {driveEvent.DistanceKm:F2} km, {driveEvent.DurationMinutes} min");
-                                    }
-                                    else
-                                    {
-                                        _logger.LogInformation($"⚠️ Skipped duplicate drive ({driveEvent.DistanceKm:F2} km)");
                                     }
                                 }
 
                                 drivePoints.Clear();
                                 isDriving = false;
 
-                                // start new stay
+                                // Start new stay
                                 currentStay = new ActivityEvent
                                 {
                                     FieldEngineerId = engineerId,
@@ -596,7 +639,7 @@ namespace EcsFeMappingApi.Services
                 }
             }
 
-            // finalize a   ny remaining
+            // finalize any remaining
             if (isDriving && drivePoints.Count >= MIN_TRIP_POINTS)
             {
                 var driveEvent = await CreateDriveEvent(drivePoints, engineerId, dbContext);
@@ -626,18 +669,61 @@ namespace EcsFeMappingApi.Services
                 }
             }
 
-            // 🔁 merge duplicates
+            // ✅ POST-PROCESSING: Remove fragment drives that are subsets of longer drives
+            var finalCleanup = new List<ActivityEvent>();
+            var allDrives = events.Where(e => e.Type == EventType.Drive).OrderByDescending(e => e.DistanceKm).ToList();
+            var allStays = events.Where(e => e.Type == EventType.Stop).ToList();
+
+            foreach (var drive in allDrives)
+            {
+                // Check if this drive is a SUBSET of an already-added longer drive
+                bool isSubset = finalCleanup.Any(existing =>
+                {
+                    if (existing.Type != EventType.Drive) return false;
+
+                    // Check time overlap
+                    bool timeOverlap = 
+                        (drive.StartTime >= existing.StartTime && drive.EndTime <= existing.EndTime) || // Fully contained
+                        (Math.Abs((existing.StartTime - drive.StartTime).TotalMinutes) < 15); // Similar start time
+
+                    if (!timeOverlap) return false;
+
+                    // Check if start location is close
+                    double startDist = HaversineDistance(
+                        new LocationPoint { Latitude = existing.StartLatitude ?? 0, Longitude = existing.StartLongitude ?? 0 },
+                        new LocationPoint { Latitude = drive.StartLatitude ?? 0, Longitude = drive.StartLongitude ?? 0 }
+                    ) * 1000;
+
+                    // If same start location + time overlap + current drive is shorter
+                    return (startDist < 300 && drive.DistanceKm < existing.DistanceKm);
+                });
+
+                if (!isSubset)
+                {
+                    finalCleanup.Add(drive);
+                }
+                else
+                {
+                    _logger.LogInformation($"🗑️ Removed fragment drive: {drive.DistanceKm:F2} km (subset of longer drive)");
+                }
+            }
+
+            // Add stays back
+            finalCleanup.AddRange(allStays);
+            events = finalCleanup.OrderBy(e => e.StartTime).ToList();
+
+            // NOW apply the existing GroupBy deduplication (Line 575-584)
             events = events
-    .GroupBy(e => new
-    {
-        e.Type,
-        StartLat = Math.Round(e.StartLatitude ?? 0, 4),
-        StartLon = Math.Round(e.StartLongitude ?? 0, 4),
-        EndLat = Math.Round(e.EndLatitude ?? 0, 4),
-        EndLon = Math.Round(e.EndLongitude ?? 0, 4)
-    })
-    .Select(g => g.OrderByDescending(x => x.DistanceKm ?? 0).First())
-    .ToList();
+                .GroupBy(e => new
+                {
+                    e.Type,
+                    StartLat = Math.Round(e.StartLatitude ?? 0, 4),
+                    StartLon = Math.Round(e.StartLongitude ?? 0, 4),
+                    EndLat = Math.Round(e.EndLatitude ?? 0, 4),
+                    EndLon = Math.Round(e.EndLongitude ?? 0, 4)
+                })
+                .Select(g => g.OrderByDescending(x => x.DistanceKm ?? 0).First())
+                .ToList();
 
             _logger.LogInformation($"✅ Final total events for FE #{engineerId}: {events.Count}");
             return events;
