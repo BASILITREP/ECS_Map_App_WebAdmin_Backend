@@ -39,7 +39,7 @@ builder.Services.AddHttpClient();
 builder.Services.AddScoped<EcsFeMappingApi.Services.NotificationService>();
 builder.Services.AddScoped<EcsFeMappingApi.Services.AuthService>();
 builder.Services.AddScoped<FcmNotificationService>();
-builder.Services.AddSingleton<ActivityProcessingService>();
+//builder.Services.AddSingleton<ActivityProcessingService>();
 builder.Services.AddHostedService(provider => provider.GetRequiredService<ActivityProcessingService>());
 builder.Services.AddSingleton<FirebaseMessagingService>();
 
