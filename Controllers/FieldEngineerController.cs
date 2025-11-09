@@ -127,10 +127,14 @@ namespace EcsFeMappingApi.Controllers
             // Only set TimeIn if it's not yet set (clocked in)
             if (!fe.TimeIn.HasValue)
             {
-                fe.TimeIn = DateTime.UtcNow;
+                fe.TimeIn = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow,
+    TimeZoneInfo.FindSystemTimeZoneById("Asia/Singapore"));
+
             }
 
-            fe.UpdatedAt = DateTime.UtcNow;
+            var phTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Singapore Standard Time");
+fe.UpdatedAt = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, phTimeZone);
+
             await _context.SaveChangesAsync();
 
             if (dto.IsAvailable.HasValue)
@@ -138,7 +142,9 @@ namespace EcsFeMappingApi.Controllers
                 fe.IsAvailable = dto.IsAvailable.Value;
                 fe.Status = dto.IsAvailable.Value ? "Active" : fe.Status;
             }
-            fe.UpdatedAt = DateTime.UtcNow;
+       
+fe.UpdatedAt = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, phTimeZone);
+
             await _context.SaveChangesAsync();
 
             return Ok(new { message = "Location updated" });
@@ -258,6 +264,8 @@ namespace EcsFeMappingApi.Controllers
                 // Find the Field Engineer using UserId from external API
                 var fieldEngineer = await _context.FieldEngineers
                     .FirstOrDefaultAsync(fe => fe.Id == request.UserId);
+                    var phTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Singapore Standard Time");
+var phNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, phTimeZone);
 
                 if (fieldEngineer == null)
                 {
@@ -274,8 +282,8 @@ namespace EcsFeMappingApi.Controllers
                         IsActive = true,
                         IsAvailable = true,
                         Status = "Logged In",
-                        CreatedAt = DateTime.UtcNow,
-                        UpdatedAt = DateTime.UtcNow
+                        CreatedAt = phNow,
+                        UpdatedAt = phNow
                     };
 
                     _context.FieldEngineers.Add(fieldEngineer);
@@ -291,7 +299,7 @@ namespace EcsFeMappingApi.Controllers
                     fieldEngineer.IsAvailable = true; // Make available upon login
                     fieldEngineer.IsActive = true;
                     fieldEngineer.Status = "Logged In";
-                    fieldEngineer.UpdatedAt = DateTime.UtcNow;
+                    fieldEngineer.UpdatedAt = phNow;
 
                     _context.FieldEngineers.Update(fieldEngineer);
                     Console.WriteLine($"Updating existing field engineer: {fieldEngineer.Name} (ID: {fieldEngineer.Id})");
