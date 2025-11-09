@@ -437,6 +437,7 @@ namespace EcsFeMappingApi.Controllers
             fieldEngineer.IsActive = true;
             fieldEngineer.IsAvailable = true;
             fieldEngineer.UpdatedAt = DateTime.UtcNow;
+            fieldEngineer.FcmToken = updatedData.FcmToken; // Update FCM token if provided
 
             await _context.SaveChangesAsync();
 
